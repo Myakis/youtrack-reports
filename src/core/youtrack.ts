@@ -341,6 +341,32 @@ export async function listBoards(f: Fetcher): Promise<Board[]> {
   }));
 }
 
+/** Найти доску по названию (без учёта регистра). */
+export function findBoard(boards: Board[], name: string): Board | null {
+  const n = name.trim().toLowerCase();
+  return n ? boards.find((b) => b.name.toLowerCase() === n) ?? null : null;
+}
+
+/** Есть ли у доски спринты, между которыми стоит выбирать. */
+export const hasSprints = (b: Board) => !b.noSprints && b.sprints.length > 1;
+
+/**
+ * Ключи задач на доске: все спринты или один. У задачи в REST нет поля «доска», поэтому — через спринты
+ * (у доски без спринтов он один, скрытый).
+ */
+export async function boardIssueKeys(f: Fetcher, board: Board, sprintId = '', opts: { signal?: Signal; onProgress?: (done: number, total: number) => void } = {}): Promise<Set<string>> {
+  const sprints = sprintId ? board.sprints.filter((s) => s.id === sprintId) : board.sprints;
+  const keys = new Set<string>();
+  let done = 0;
+  await pool(sprints, 4, async (s) => {
+    if (opts.signal?.cancelled) return;
+    const sp = await getJson(f, `/api/agiles/${board.id}/sprints/${s.id}?` + qs({ fields: 'issues(idReadable)' }));
+    for (const it of sp.issues || []) if (it?.idReadable) keys.add(it.idReadable);
+    opts.onProgress?.(++done, sprints.length);
+  });
+  return keys;
+}
+
 /** Выполнить задачи не больше n одновременно. */
 async function pool<T>(items: T[], n: number, run: (x: T) => Promise<void>) {
   let i = 0;

@@ -54,6 +54,12 @@
       <label class="fld"><span>Проект</span>
         <input id="project" list="projectsList" placeholder="Все проекты" autocomplete="off" spellcheck="false">
       </label>
+      <div class="fld"><label for="board">Доска</label>
+        <div class="inline">
+          <input id="board" list="boardsList" placeholder="Любая" title="Только задачи этой доски. Сотрудник тогда необязателен — покажутся все задачи доски по остальным условиям" autocomplete="off" spellcheck="false">
+          <select id="boardSprint" hidden title="Спринт доски"></select>
+        </div>
+      </div>
       <label class="fld"><span>Тип</span>
         <input id="types" placeholder="Любой" title="Можно несколько через запятую: Frontend, Mobile" autocomplete="off" spellcheck="false">
       </label>
@@ -179,6 +185,7 @@
 
   <datalist id="usersList"></datalist>
   <datalist id="projectsList"></datalist>
+  <datalist id="boardsList"></datalist>
 
   <dialog id="dlgExport">
     <form method="dialog">

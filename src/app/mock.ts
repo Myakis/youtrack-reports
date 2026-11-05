@@ -76,7 +76,7 @@ export const mockFetch: Fetcher = async (path) => {
     const q = url.searchParams.get('query') || '';
     const who = /(?:assignee|for): \{([^}]+)\}/.exec(q)?.[1];
     const commenter = /commenter: \{([^}]+)\}/.exec(q)?.[1];
-    const ids = /issue id: (.+)$/.exec(q)?.[1].split(/,\s*/);
+    const ids = /issue id: ([^\s,]+(?:,\s*[^\s,]+)*)/.exec(q)?.[1].split(/,\s*/);
     const prj = /project: \{([^}]+)\}/.exec(q)?.[1];
     const found = issues.filter((i) => (!who || (i.customFields[3].value as { login: string }).login === who)
       && (!commenter || i.comments.some((c: any) => c.author.login === commenter))

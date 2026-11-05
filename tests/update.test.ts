@@ -61,3 +61,16 @@ describe('релиз с GitHub', () => {
     expect(isStale({ checkedAt: 1000, latest: null }, 1000 + CHECK_EVERY_MS + 1)).toBe(true);
   });
 });
+
+describe('браузер для пакета', async () => {
+  const { detectPlatform } = await import('../src/shared');
+  it('по адресу расширения, а не по наличию browser.*', () => {
+    expect(detectPlatform('moz-extension://abc/')).toBe('firefox');
+    // Яндекс Браузер даёт browser.*, но адрес — chrome-extension://
+    expect(detectPlatform('chrome-extension://abc/', 'Mozilla/5.0 YaBrowser/25.0')).toBe('chromium');
+  });
+  it('вне расширения — по User-Agent', () => {
+    expect(detectPlatform('', 'Mozilla/5.0 (Macintosh) Gecko/20100101 Firefox/140.0')).toBe('firefox');
+    expect(detectPlatform('', 'Mozilla/5.0 Chrome/141.0')).toBe('chromium');
+  });
+});

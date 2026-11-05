@@ -4,8 +4,8 @@ import { checkUpdate, isNewer, isStale, type UpdateState } from '../core/update'
 import { md } from './md';
 import { applySuggestion, currentToken, suggest, tidyList, uniqSorted } from '../core/suggest';
 import {
-  attachBoards, badParts, baseQuery, buildQuery, fmtDate, isParseError, dropEach, findAssigneeAttr, knownStates, listProjects, listTags, listUsers, me, queryParts, searchIssues, withoutPeriod, YtError,
-  type DateField, type Fetcher, type Issue, type Project, type QueryOptions, type RawResponse, type Signal, type User,
+  attachBoards, badParts, boardIssueKeys, findBoard, hasSprints, listBoards, baseQuery, buildQuery, fmtDate, isParseError, dropEach, findAssigneeAttr, knownStates, listProjects, listTags, listUsers, me, queryParts, searchIssues, withoutPeriod, YtError,
+  type Board, type DateField, type Fetcher, type Issue, type Project, type QueryOptions, type RawResponse, type Signal, type User,
 } from '../core/youtrack';
 import { findParticipation, issuesByKeys, ROLE_NAMES, type Role } from '../core/participation';
 import { fileName, toCSV, toJSON, toMarkdown, toTxt, type ExportMeta, type ExportOptions } from '../core/export';
@@ -38,6 +38,7 @@ const store = {
 let token = '';
 let users: User[] = [];
 let projects: Project[] = [];
+let boards: Board[] = [];
 let team: string[] = [];          // логины «моей команды»
 let issues: Issue[] = [];
 let lastMeta: ExportMeta | null = null;
@@ -149,6 +150,7 @@ async function connect() {
     $<HTMLInputElement>('assignee').placeholder = 'Логин (список пользователей недоступен)';
   });
   listProjects(yt).then((ps) => { projects = ps; fillProjects(); }).catch(() => {});
+  listBoards(yt).then((bs) => { boards = bs.sort((a, b) => a.name.localeCompare(b.name, 'ru')); fillBoards(); }).catch(() => {});
   listTags(yt).then((ts) => { tagList = uniqSorted([...tagList, ...ts]); }).catch(() => {}).finally(() => { tagsLoaded = true; });
   knownStates(yt, $<HTMLInputElement>('project').value).then(fillStates).catch(() => {});
 }
@@ -159,6 +161,38 @@ function fillUsers() {
 }
 function fillProjects() {
   $('projectsList').innerHTML = projects.map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`).join('');
+}
+
+// ---------- Доска ----------
+/** Спринт, сохранённый в форме, — чтобы выбрать его, когда список досок загрузится. */
+let savedSprint = '';
+
+const selectedBoard = () => findBoard(boards, $<HTMLInputElement>('board').value);
+const boardSprintId = () => { const b = selectedBoard(); return b && hasSprints(b) ? $<HTMLSelectElement>('boardSprint').value : ''; };
+/** «Mobile Scrum» или «Mobile Scrum / Спринт 42». */
+function boardLabel(): string {
+  const b = selectedBoard();
+  if (!b) return '';
+  const s = b.sprints.find((x) => x.id === boardSprintId());
+  return s ? `${b.name} / ${s.name}` : b.name;
+}
+
+function fillBoards() {
+  $('boardsList').innerHTML = boards.map((b) => `<option value="${esc(b.name)}">${esc(b.projects.join(', '))}</option>`).join('');
+  renderSprints();
+}
+
+function renderSprints() {
+  const b = selectedBoard();
+  const sel = $<HTMLSelectElement>('boardSprint');
+  const show = !!b && hasSprints(b);
+  sel.hidden = !show;
+  if (!show) return;
+  const keep = sel.value || savedSprint;
+  // Новые спринты обычно в конце — показываем их первыми
+  sel.innerHTML = '<option value="">Все спринты</option>' + [...b!.sprints].reverse().map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  sel.value = b!.sprints.some((s) => s.id === keep) ? keep : '';
+  savedSprint = '';
 }
 
 /** Логин из поля «Исполнитель»: принимаем и логин, и полное имя. */
@@ -439,7 +473,9 @@ function reloadStates() {
 
 function onFormChange() {
   if (!queryEdited) $<HTMLTextAreaElement>('query').value = formQuery();
-  $('qState').textContent = (queryEdited ? '· изменён вручную' : '') + (participant() ? ' · фильтр задач; участие сотрудника проверяется по истории' : '');
+  const bl = boardLabel();
+  $('qState').textContent = (queryEdited ? '· изменён вручную' : '') + (participant() ? ' · фильтр задач; участие сотрудника проверяется по истории' : '')
+    + (bl ? ` · и только задачи доски «${bl}»` : '');
   $('wideBox').hidden = !participant();
   updateStar();
   renderTeam();
@@ -449,6 +485,7 @@ function onFormChange() {
     project: $<HTMLInputElement>('project').value, preset: $<HTMLSelectElement>('preset').value,
     from: $<HTMLInputElement>('from').value, to: $<HTMLInputElement>('to').value,
     mode: $<HTMLSelectElement>('mode').value,
+    board: $<HTMLInputElement>('board').value, sprint: $<HTMLSelectElement>('boardSprint').value || savedSprint,
     dateField: $<HTMLSelectElement>('dateField').value, withBoards: $<HTMLInputElement>('withBoards').checked,
   });
 }
@@ -474,7 +511,10 @@ async function search() {
   const query = $<HTMLTextAreaElement>('query').value.trim();
   const login = assigneeLogin();
   const byRole = participant();
-  if (!login && (!queryEdited || byRole)) return toast('Выберите сотрудника');
+  const boardText = $<HTMLInputElement>('board').value.trim();
+  const board = selectedBoard();
+  if (boardText && !board) return toast(boards.length ? 'Такой доски нет — выберите из списка' : 'Список досок ещё не загружен');
+  if (!login && (byRole || (!queryEdited && !board))) return toast(byRole ? 'Выберите сотрудника' : 'Выберите сотрудника или доску');
   // История изменений просматривается по всем задачам фильтра — без фильтра это весь YouTrack
   if (byRole && !query) return toast('Для поиска по участию укажите период или проект');
   if (running) running.cancelled = true;
@@ -486,6 +526,13 @@ async function search() {
   let stoppedNote = '';
   try {
     let found: Issue[];
+    // Задачи доски: у задачи в REST нет поля «доска» — берём их из спринтов доски
+    let boardKeys: Set<string> | null = null;
+    if (board) {
+      progress('Задачи доски…', 0.05);
+      boardKeys = await boardIssueKeys(yt, board, boardSprintId(), { signal, onProgress: (d, t) => progress(`Задачи доски: спринт ${d} из ${t}`, 0.05 + 0.15 * d / t) });
+      if (signal.cancelled) return;
+    }
     if (byRole) {
       // «Показать найденное» — остановить проверку истории и показать то, что уже нашлось
       const stop = { requested: false };
@@ -512,9 +559,14 @@ async function search() {
       found = await issuesByKeys(yt, YOUTRACK, keys, { signal, onProgress: (n) => progress(`Загрузка задач: ${num(n)} из ${num(keys.length)}…`, 0.72 + 0.1 * n / Math.max(1, keys.length)) });
       const roles = r.roles;
       for (const i of found) i.roles = roles.get(i.key) || [];
+    } else if (boardKeys && !login) {
+      // Без сотрудника — задачи доски по остальным условиям запроса
+      const keys = [...boardKeys];
+      found = await issuesByKeys(yt, YOUTRACK, keys, { signal, query, onProgress: (n) => progress(`Задачи доски (${num(keys.length)}): подходят ${num(n)}…`, 0.3) });
     } else {
       found = await searchIssues(yt, YOUTRACK, query, { signal, onProgress: (n) => progress(`Загружено задач: ${num(n)}…`, 0.3) });
     }
+    if (boardKeys) found = found.filter((i) => boardKeys!.has(i.key));
     if ($<HTMLInputElement>('withBoards').checked && found.length) {
       const from = byRole ? 0.82 : 0.4;
       progress('Определяю доски…', from);
@@ -528,15 +580,19 @@ async function search() {
     const from = $<HTMLInputElement>('from').value, to = $<HTMLInputElement>('to').value;
     const dfLabel = $<HTMLSelectElement>('dateField').selectedOptions[0].textContent;
     lastMeta = {
-      assignee: login ? `${userName(login)} (${login})${byRole ? ', участие в задачах' : ''}` : 'по запросу',
-      query,
+      assignee: login ? `${userName(login)} (${login})${byRole ? ', участие в задачах' : ''}` : board ? `все задачи доски «${boardLabel()}»` : 'по запросу',
+      query: board ? `${query} + доска «${boardLabel()}»` : query,
       period: periodLabel(from, to) ? `${periodLabel(from, to)} (по дате ${dfLabel})` : undefined,
       generated: Date.now(),
     };
     selected = '';
     render();
     renderDetail();
-    if (!found.length && !byRole) await explainEmpty(query);
+    if (!found.length && boardKeys) {
+      notice('warn', boardKeys.size
+        ? `<p><b>Ничего не найдено.</b> На доске «${esc(boardLabel())}» ${num(boardKeys.size)} задач, но ни одна не подходит под остальные условия — расширьте период или уберите статус.</p>`
+        : `<p><b>На доске «${esc(boardLabel())}» нет задач</b> (или нет доступа к её спринтам).</p>`);
+    } else if (!found.length && !byRole) await explainEmpty(query);
     if (!found.length && byRole) notice('warn', '<p><b>Ничего не найдено.</b> Сотрудник не был исполнителем, не менял и не комментировал задачи этого фильтра. Попробуйте расширить период или убрать статус.</p>');
     if (stoppedNote) notice('warn', stoppedNote);
   } catch (e) {
@@ -821,6 +877,8 @@ async function init() {
     $<HTMLInputElement>('tags').value = form.tags || '';
     $<HTMLInputElement>('wide').checked = !!form.wide;
     $<HTMLInputElement>('project').value = form.project || '';
+    $<HTMLInputElement>('board').value = form.board || '';
+    savedSprint = form.sprint || '';
     $<HTMLSelectElement>('preset').value = form.preset || 'month';
     $<HTMLSelectElement>('dateField').value = form.dateField || 'resolved';
     $<HTMLInputElement>('withBoards').checked = form.withBoards !== false;
@@ -841,6 +899,9 @@ async function init() {
   attachSuggest($<HTMLInputElement>('tags'), $('tagsSugg'), () => tagList,
     () => tagsLoaded ? 'Тегов не найдено — введите вручную' : 'Загрузка тегов…');
   $('project').addEventListener('input', reloadStates);
+  $('board').addEventListener('input', () => { renderSprints(); onFormChange(); });
+  $('board').addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); search(); } });
+  $('boardSprint').addEventListener('change', onFormChange);
   renderStates();
   $('statesBtn').onclick = () => toggleStatesPop();
   $('statesOpts').addEventListener('change', () => {

@@ -120,16 +120,19 @@ export async function findParticipation(f: Fetcher, base: string, login: string,
 }
 
 /** Задачи по ключам: запросом «issue id: A, B, …» по 50; если YouTrack его не понял — по одной. */
-export async function issuesByKeys(f: Fetcher, ytUrl: string, list: string[], o: { signal?: Signal; onProgress?: (n: number) => void } = {}): Promise<Issue[]> {
+/** Задачи по ключам; query — ещё условия поверх (статус, период…): тогда вернутся только подходящие. */
+export async function issuesByKeys(f: Fetcher, ytUrl: string, list: string[], o: { signal?: Signal; onProgress?: (n: number) => void; query?: string } = {}): Promise<Issue[]> {
+  const extra = o.query?.trim() ? ' ' + o.query.trim() : '';
   const out: Issue[] = [];
   for (let i = 0; i < list.length; i += 50) {
     check(o.signal);
     const chunk = list.slice(i, i + 50);
     try {
-      const page: any[] = await getJson(f, '/api/issues?' + qs({ query: 'issue id: ' + chunk.join(', '), fields: ISSUE_FIELDS, $top: chunk.length }));
+      const page: any[] = await getJson(f, '/api/issues?' + qs({ query: 'issue id: ' + chunk.join(', ') + extra, fields: ISSUE_FIELDS, $top: chunk.length }));
       out.push(...page.map((r) => normalizeIssue(r, ytUrl)));
     } catch (e) {
-      if (!isParseError(e)) throw e;
+      // Без доп. условий можно загрузить по одной; с ними — ошибка в самом запросе, пусть её покажут
+      if (!isParseError(e) || extra) throw e;
       for (const k of chunk) {
         check(o.signal);
         out.push(normalizeIssue(await getJson(f, `/api/issues/${encodeURIComponent(k)}?` + qs({ fields: ISSUE_FIELDS })), ytUrl));
