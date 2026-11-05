@@ -77,7 +77,15 @@ code { font-family: var(--mono); font-size: 12px; background: var(--tag-bg); bor
 .filters { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .fld { display: flex; flex-direction: column; gap: 3px; min-width: 130px; }
-.fld > span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.fld > span, .fld > label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+/* Подсказки для полей через запятую (теги) */
+.sugg-wrap { position: relative; }
+.sugg { position: absolute; z-index: 30; top: 100%; left: 0; right: 0; min-width: 200px; margin: 3px 0 0; padding: 4px; list-style: none;
+  max-height: 260px; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); }
+.sugg li { padding: 5px 8px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sugg li.on { background: var(--row-sel); }
+.sugg li mark { background: none; color: var(--accent); font-weight: 600; }
+.sugg li.none { color: var(--muted); cursor: default; font-size: 12px; }
 .fld.grow2 { flex: 1 1 260px; max-width: 420px; }
 .inline { display: flex; gap: 6px; align-items: flex-start; }
 .inline input, .inline textarea { flex: 1; }

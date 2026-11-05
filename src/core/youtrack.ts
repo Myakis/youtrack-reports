@@ -1,4 +1,5 @@
 // Запросы к REST API YouTrack. Сам fetch подставляется снаружи: из расширения (сессия или токен) или тестовые данные.
+import { uniqSorted } from './suggest';
 
 export interface RawResponse {
   status: number;
@@ -72,6 +73,18 @@ export interface Project { key: string; name: string }
 export async function listProjects(f: Fetcher): Promise<Project[]> {
   const ps: any[] = await getJson(f, '/api/admin/projects?' + qs({ fields: 'shortName,name,archived', $top: 1000 }));
   return ps.filter((p) => !p.archived).map((p) => ({ key: p.shortName, name: p.name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+/** Теги, видимые текущему пользователю (общие и свои), без повторов, по алфавиту. */
+export async function listTags(f: Fetcher): Promise<string[]> {
+  const out: string[] = [];
+  for (let skip = 0; skip < 20000;) {
+    const page: any[] = await getJson(f, '/api/tags?' + qs({ fields: 'name', $top: 500, $skip: skip }));
+    if (!page.length) break;
+    skip += page.length;
+    for (const t of page) if (t?.name) out.push(t.name);
+  }
+  return uniqSorted(out);
 }
 
 // ---------- Запрос ----------

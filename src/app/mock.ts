@@ -68,6 +68,10 @@ export const mockFetch: Fetcher = async (path) => {
   if (p === '/api/users/me') return ok(users[0]);
   if (p === '/api/users') return ok(users.slice(skip, skip + top));
   if (p === '/api/admin/projects') return ok(projects);
+  if (p === '/api/tags') {
+    const all = ['экспорт', 'Q4', 'баг', 'UI', 'производительность', 'доки', 'CashDash', 'CashDash Mobile', 'Рефакторинг'].map((name) => ({ name }));
+    return ok(all.slice(skip, skip + top));
+  }
   if (p === '/api/issues') {
     const q = url.searchParams.get('query') || '';
     const who = /(?:assignee|for): \{([^}]+)\}/.exec(q)?.[1];

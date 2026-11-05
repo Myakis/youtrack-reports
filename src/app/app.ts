@@ -2,8 +2,9 @@
 import { api, inExtension, PLATFORM, VERSION, YOUTRACK, YOUTRACK_MATCH } from '../shared';
 import { checkUpdate, isNewer, isStale, type UpdateState } from '../core/update';
 import { md } from './md';
+import { applySuggestion, currentToken, suggest, tidyList, uniqSorted } from '../core/suggest';
 import {
-  attachBoards, badParts, baseQuery, buildQuery, fmtDate, isParseError, dropEach, findAssigneeAttr, knownStates, listProjects, listUsers, me, queryParts, searchIssues, withoutPeriod, YtError,
+  attachBoards, badParts, baseQuery, buildQuery, fmtDate, isParseError, dropEach, findAssigneeAttr, knownStates, listProjects, listTags, listUsers, me, queryParts, searchIssues, withoutPeriod, YtError,
   type DateField, type Fetcher, type Issue, type Project, type QueryOptions, type RawResponse, type Signal, type User,
 } from '../core/youtrack';
 import { findParticipation, issuesByKeys, ROLE_NAMES, type Role } from '../core/participation';
@@ -148,6 +149,7 @@ async function connect() {
     $<HTMLInputElement>('assignee').placeholder = 'Логин (список пользователей недоступен)';
   });
   listProjects(yt).then((ps) => { projects = ps; fillProjects(); }).catch(() => {});
+  listTags(yt).then((ts) => { tagList = uniqSorted([...tagList, ...ts]); }).catch(() => {}).finally(() => { tagsLoaded = true; });
   knownStates(yt, $<HTMLInputElement>('project').value).then(fillStates).catch(() => {});
 }
 
@@ -297,6 +299,89 @@ async function explainEmpty(query: string) {
   notice('warn', `<p><b>Ничего не найдено.</b> Вот что удалось выяснить:</p><ul>${html.join('')}</ul>`, [...buttons, toYt]);
 }
 
+// ---------- Подсказки для полей через запятую (теги) ----------
+let tagList: string[] = [];        // теги из YouTrack и из найденных задач
+let tagsLoaded = false;
+
+/** Выпадающий список под полем: дополняет значение после последней запятой. */
+function attachSuggest(input: HTMLInputElement, box: HTMLElement, source: () => string[], emptyText: () => string) {
+  let items: string[] = [];
+  let active = -1;
+
+  const mark = (v: string) => {
+    const q = currentToken(input.value);
+    const k = q ? v.toLowerCase().indexOf(q.toLowerCase()) : -1;
+    return k < 0 ? esc(v) : esc(v.slice(0, k)) + `<mark>${esc(v.slice(k, k + q.length))}</mark>` + esc(v.slice(k + q.length));
+  };
+  const close = () => { box.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); };
+  const paint = () => {
+    box.innerHTML = items.length
+      ? items.map((v, i) => `<li role="option" data-i="${i}" class="${i === active ? 'on' : ''}" aria-selected="${i === active}">${mark(v)}</li>`).join('')
+      : `<li class="none">${esc(emptyText())}</li>`;
+    box.querySelector('li.on')?.scrollIntoView({ block: 'nearest' });
+  };
+  const show = () => {
+    items = suggest(source(), input.value);
+    // Нечего показать и пользователь уже что-то ввёл — не мешать
+    if (!items.length && currentToken(input.value)) return close();
+    active = -1;
+    box.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    paint();
+  };
+  const pick = (v: string) => {
+    input.value = applySuggestion(input.value, v);
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+    show();
+  };
+
+  input.addEventListener('focus', show);
+  input.addEventListener('input', show);
+  input.addEventListener('blur', () => {
+    close();
+    const t = tidyList(input.value);
+    if (t !== input.value) { input.value = t; input.dispatchEvent(new Event('input')); }
+  });
+  // Захват — чтобы Enter выбрал подсказку раньше, чем запустит поиск
+  input.addEventListener('keydown', (e) => {
+    const open = !box.hidden && items.length > 0;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (box.hidden) return show();
+      if (!items.length) return;
+      e.preventDefault();
+      active = e.key === 'ArrowDown' ? (active + 1) % items.length : (active - 1 + items.length) % items.length;
+      paint();
+    } else if ((e.key === 'Enter' || e.key === 'Tab') && open && active >= 0) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      pick(items[active]);
+    } else if (e.key === 'Escape' && !box.hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    } else if (e.key === 'Enter') {
+      close();
+    }
+  }, true);
+  // mousedown, а не click: иначе поле теряет фокус и список закрывается раньше выбора
+  box.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-i]');
+    if (li) pick(items[Number(li.dataset.i)]);
+  });
+  box.addEventListener('mousemove', (e) => {
+    const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-i]');
+    const i = li ? Number(li.dataset.i) : -1;
+    if (li && i !== active) { active = i; paint(); }
+  });
+}
+
+/** Добавить теги найденных задач — на случай, если /api/tags отдал не все. */
+function addIssueTags(list: Issue[]) {
+  tagList = uniqSorted([...tagList, ...list.flatMap((i) => i.tags)]);
+}
+
 // ---------- Статусы: мультиселект ----------
 let knownStateList: string[] = [];   // статусы, которые встречаются у задач (частые первыми)
 
@@ -437,6 +522,7 @@ async function search() {
     }
     if (signal.cancelled) return;
     issues = found;
+    addIssueTags(found);
     excluded.clear();
     lastLogin = login;
     const from = $<HTMLInputElement>('from').value, to = $<HTMLInputElement>('to').value;
@@ -752,6 +838,8 @@ async function init() {
   render();
 
   for (const id of ['assignee', 'types', 'tags', 'project']) $(id).addEventListener('input', onFormChange);
+  attachSuggest($<HTMLInputElement>('tags'), $('tagsSugg'), () => tagList,
+    () => tagsLoaded ? 'Тегов не найдено — введите вручную' : 'Загрузка тегов…');
   $('project').addEventListener('input', reloadStates);
   renderStates();
   $('statesBtn').onclick = () => toggleStatesPop();

@@ -57,9 +57,11 @@
       <label class="fld"><span>Тип</span>
         <input id="types" placeholder="Любой" title="Можно несколько через запятую: Frontend, Mobile" autocomplete="off" spellcheck="false">
       </label>
-      <label class="fld"><span>Тег</span>
-        <input id="tags" placeholder="Любой" title="Можно несколько через запятую — любой из них" autocomplete="off" spellcheck="false">
-      </label>
+      <div class="fld sugg-wrap"><label for="tags">Тег</label>
+        <input id="tags" placeholder="Любой" title="Можно несколько через запятую — любой из них" autocomplete="off" spellcheck="false"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tagsSugg">
+        <ul class="sugg" id="tagsSugg" role="listbox" hidden></ul>
+      </div>
     </div>
     <div class="row">
       <label class="fld"><span>Период</span>
