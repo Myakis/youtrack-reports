@@ -1,5 +1,7 @@
 // Страница TrackDesk: выбор исполнителя, поиск выполненных задач, детали и выгрузка.
-import { api, inExtension, VERSION, YOUTRACK, YOUTRACK_MATCH } from '../shared';
+import { api, inExtension, PLATFORM, VERSION, YOUTRACK, YOUTRACK_MATCH } from '../shared';
+import { checkUpdate, isNewer, isStale, type UpdateState } from '../core/update';
+import { md } from './md';
 import {
   attachBoards, badParts, baseQuery, buildQuery, fmtDate, isParseError, dropEach, findAssigneeAttr, knownStates, listProjects, listUsers, me, queryParts, searchIssues, withoutPeriod, YtError,
   type DateField, type Fetcher, type Issue, type Project, type QueryOptions, type RawResponse, type Signal, type User,
@@ -636,6 +638,7 @@ function openSettings() {
   $<HTMLSelectElement>('assigneeAttr').value = assigneeAttr;
   $('settingsStatus').textContent = token ? 'Сейчас используется токен.' : 'Сейчас используется сессия браузера.';
   $<HTMLDialogElement>('dlgSettings').showModal();
+  if (!updBusy) checkForUpdate(false);
 }
 
 async function saveToken(value: string) {
@@ -649,6 +652,59 @@ async function saveToken(value: string) {
   } catch (e) {
     $('settingsStatus').textContent = '✕ ' + (e as Error).message;
   }
+}
+
+// ---------- Обновления ----------
+let updState: UpdateState | null = null;
+let updBusy = false;
+
+function renderUpdate() {
+  const latest = updState?.latest;
+  const fresh = !!latest && isNewer(latest.version, VERSION);
+  $('updCurrent').textContent = VERSION;
+  $('updStatus').textContent = updBusy ? 'Проверка…'
+    : updState?.error ? `✕ ${updState.error}`
+    : !updState ? ''
+    : !latest ? 'Релизов на GitHub пока нет.'
+    : fresh ? `Доступна версия ${latest.version}.`
+    : `✓ Это последняя версия (проверено ${new Date(updState.checkedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}).`;
+  $<HTMLButtonElement>('btnUpdCheck').disabled = updBusy;
+
+  $('updBox').hidden = !fresh;
+  $('btnUpdGet').hidden = !fresh;
+  $('btnUpdReload').hidden = !fresh || PLATFORM !== 'chromium' || !inExtension;
+  $('updBadge').hidden = !fresh;
+  if (!fresh) return;
+  $('updBadge').textContent = `↑ ${latest.version}`;
+  $('btnUpdGet').textContent = `Скачать ${latest.version}`;
+  $('updVer').textContent = latest.version;
+  $('updNotes').innerHTML = latest.notes.trim() ? md(latest.notes) : '<p class="muted">Описания нет.</p>';
+  $('updHow').innerHTML = PLATFORM === 'firefox'
+    ? '<li>«Скачать» — загрузится файл <code>.xpi</code>.</li><li>Перетащите его в окно Firefox и подтвердите установку — настройки сохранятся.</li>'
+    : '<li>«Скачать» — загрузится архив <code>.zip</code>.</li>'
+      + '<li>Распакуйте его <b>в ту же папку</b>, откуда установлено расширение, с заменой файлов.</li>'
+      + '<li>«Перезапустить расширение» — TrackDesk перечитает файлы и откроется заново. Токен и настройки сохранятся.</li>';
+}
+
+async function checkForUpdate(force: boolean) {
+  updState = await store.get<UpdateState | null>('update', null);
+  if (!force && !isStale(updState)) return renderUpdate();
+  updBusy = true;
+  renderUpdate();
+  updState = await checkUpdate(PLATFORM, updState);
+  updBusy = false;
+  await store.set('update', updState);
+  renderUpdate();
+}
+
+function downloadUpdate() {
+  const url = updState?.latest?.download;
+  if (url) inExtension ? api.tabs.create({ url, active: false }) : open(url);
+}
+
+async function reloadExtension() {
+  await store.set('reopenAfterUpdate', true);
+  api.runtime.reload();
 }
 
 // ---------- Тема ----------
@@ -767,6 +823,10 @@ async function init() {
   $('exportCopy').onclick = () => copyText(exportText(format, exportOptions()), 'Скопировано');
 
   $('btnSettings').onclick = openSettings;
+  $('updBadge').onclick = openSettings;
+  $('btnUpdCheck').onclick = () => checkForUpdate(true);
+  $('btnUpdGet').onclick = downloadUpdate;
+  $('btnUpdReload').onclick = reloadExtension;
   $('assigneeAttr').addEventListener('change', () => {
     assigneeAttr = $<HTMLSelectElement>('assigneeAttr').value;
     store.set('assigneeAttr', assigneeAttr);
@@ -796,6 +856,7 @@ async function init() {
     }
   });
 
+  checkForUpdate(false);
   await connect();
 }
 

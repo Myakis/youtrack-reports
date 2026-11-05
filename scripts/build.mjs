@@ -46,7 +46,7 @@ const base = {
   description: 'Задачи YouTrack по исполнителю: выполненные задачи, доски, комментарии и выгрузка для отчёта.',
   icons: { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 96: 'icons/icon96.png', 128: 'icons/icon128.png' },
   action: { default_title: 'Открыть TrackDesk', default_icon: { 16: 'icons/icon16.png', 32: 'icons/icon32.png' } },
-  permissions: ['storage', 'tabs', 'cookies'],
+  permissions: ['storage', 'tabs', 'cookies', 'alarms'],
   // chat.office.lan — ИИ-чат (вход по cookie token, как в LogDesk)
   host_permissions: [YOUTRACK + '/*', 'https://chat.office.lan/*'],
 };
