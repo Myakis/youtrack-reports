@@ -1,6 +1,6 @@
 # Релиз: проверка, сборка и GitHub Release с пакетами для Chrome и Firefox.
 # Запуск — тегом vX.Y.Z (git tag v0.6.5 && git push origin v0.6.5) или кнопкой «Run workflow» во вкладке Actions:
-# тогда версия берётся из package.json, а тег создаётся сам. Описание релиза — раздел этой версии из CHANGELOG.md.
+# тогда версия берётся из app/package.json, а тег создаётся сам. Описание релиза — раздел этой версии из CHANGELOG.md.
 name: Release
 
 on:
@@ -18,6 +18,10 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Код расширения — в папке app; CHANGELOG.md — в корне (его читает scripts/release-notes.mjs)
+    defaults:
+      run:
+        working-directory: app
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +29,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - name: Версия
         id: v

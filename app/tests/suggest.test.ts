@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applySuggestion, currentToken, suggest, tidyList, uniqSorted } from '../src/core/suggest';
+import { applySuggestion, currentToken, filterItems, suggest, tidyList, uniqSorted } from '../src/core/suggest';
 import { listTags } from '../src/core/youtrack';
 
 const tags = ['CashDash', 'Q4', 'баг', 'доки', 'экспорт', 'CashDash Mobile', 'Dash'];
@@ -29,6 +29,25 @@ describe('подсказки тегов', () => {
   });
   it('без повторов и по алфавиту', () => {
     expect(uniqSorted(['b', 'A', 'a', ' ', 'B '])).toEqual(['A', 'b']);
+  });
+});
+
+describe('поиск в списке выбора (проект, доска, спринт)', () => {
+  const items = [
+    { value: 'b1', label: 'Pay CashDash', hint: 'PAY' },
+    { value: 'b2', label: 'CashDash | dev', hint: 'PSLABDEV' },
+    { value: 'b3', label: 'Mobile Scrum', hint: 'MOB, CD' },
+  ];
+  const labels = (q: string) => filterItems(items, q).map((i) => i.label);
+  it('пустой поиск — весь список по порядку', () => {
+    expect(labels('')).toEqual(['Pay CashDash', 'CashDash | dev', 'Mobile Scrum']);
+  });
+  it('начинающиеся с введённого — первыми, без учёта регистра', () => {
+    expect(labels('cash')).toEqual(['CashDash | dev', 'Pay CashDash']);
+  });
+  it('ищет и по подсказке — ключу проекта', () => {
+    expect(labels('pslab')).toEqual(['CashDash | dev']);
+    expect(labels('mob')).toEqual(['Mobile Scrum']);
   });
 });
 

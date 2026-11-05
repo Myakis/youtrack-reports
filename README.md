@@ -50,29 +50,39 @@ YouTrack → профиль → «Безопасность аккаунта» �
 
 ## Как это устроено
 
-- `src/core/youtrack.ts` — REST API YouTrack: `/api/issues` страницами по 100, пользователи, проекты.
+Код расширения — в папке `app/`; в корне — README, CHANGELOG и `.github` (CI и релиз).
+
+- `app/src/core/youtrack.ts` — REST API YouTrack: `/api/issues` страницами по 100, пользователи, проекты.
   Запрос: `assignee: {логин} state: {Ревью}, {Готово} type: {…} tag: {…} resolved date: …`.
 - Доски: в REST у задачи нет поля «доска», поэтому берутся доски (`/api/agiles`) проектов найденных задач
   и состав их спринтов. Доска без спринтов подписывается просто названием, со спринтами — «Доска / Спринт».
-- `src/core/participation.ts` — поиск по участию: история поля «Исполнитель» у каждой задачи фильтра (до 3 000 задач).
-- `src/core/export.ts` — Markdown / JSON / CSV / TXT; `src/core/prompts.ts` — запросы к модели; `src/app/ai.ts` — чат.
+- `app/src/core/participation.ts` — поиск по участию: история поля «Исполнитель» у каждой задачи фильтра (до 3 000 задач).
+- `app/src/core/export.ts` — Markdown / JSON / CSV / TXT; `app/src/core/prompts.ts` — запросы к модели.
+- Интерфейс — React + [shadcn/ui](https://ui.shadcn.com) (Radix, Tailwind v4): `app/src/app/App.tsx` — страница и поиск,
+  `app/src/app/components/` — фильтры, таблица, детали, ИИ-чат (`AiPanel.tsx`), окна; `app/src/components/ui/` — компоненты shadcn.
+  Логика YouTrack, выгрузки и обновлений — в `app/src/core/` и от React не зависит.
 
 ## Для разработки
 
 Нужен Node.js 22 или новее.
 
 ```
+cd app
 npm ci
 npm run typecheck
 npm test
-npm run build        # dist/firefox, dist/chromium и пакеты в release/
+npm run build        # app/dist/firefox, app/dist/chromium и пакеты в app/release/
 npm run icons        # пересоздать иконки
 ```
 
-Для разработки в Chrome удобно загрузить распакованное расширение прямо из `dist/chromium`: после `npm run build`
+Для разработки в Chrome удобно загрузить распакованное расширение прямо из `app/dist/chromium`: после `npm run build`
 достаточно нажать ⟳ у TrackDesk на `chrome://extensions`.
 
-Страницу можно открыть без расширения на тестовых данных: `python3 -m http.server 8778` из папки проекта →
+Новый компонент shadcn: `npx shadcn@latest add <имя>` — (из папки `app`) — файл появится в `app/src/components/ui/`. CLI иногда пишет
+`import { cn } from "cn"` и ставит пакет `cn` — замените импорт на `@/lib/utils` и удалите пакет (`npm uninstall cn`).
+Цвета — в `app/src/app/globals.css` (переменные shadcn, акцент — фиолетовый).
+
+Страницу можно открыть без расширения на тестовых данных: `python3 -m http.server 8778` из папки `app` →
 `http://localhost:8778/dist/firefox/app.html`.
 
 ## Релиз
@@ -85,10 +95,10 @@ npm run icons        # пересоздать иконки
 
 Как выпустить версию:
 
-1. Поднимите `version` в `package.json` и добавьте сверху `CHANGELOG.md` раздел `## X.Y.Z — ДД.ММ.ГГГГ`.
+1. Поднимите `version` в `app/package.json` и добавьте сверху `CHANGELOG.md` раздел `## X.Y.Z — ДД.ММ.ГГГГ`.
 2. Закоммитьте и отправьте в `main`.
 3. Запустите релиз — любым способом:
-   - тегом: `git tag vX.Y.Z && git push origin vX.Y.Z` (тег должен совпадать с версией в `package.json`);
-   - кнопкой: GitHub → Actions → Release → Run workflow (тег создастся сам из версии в `package.json`).
+   - тегом: `git tag vX.Y.Z && git push origin vX.Y.Z` (тег должен совпадать с версией в `app/package.json`);
+   - кнопкой: GitHub → Actions → Release → Run workflow (тег создастся сам из версии в `app/package.json`).
 
 Релиз не соберётся, если тег не совпадает с версией, такой релиз уже есть или в `CHANGELOG.md` нет раздела версии.
