@@ -12,6 +12,10 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Код расширения — в папке app; README, CHANGELOG и .github — в корне
+    defaults:
+      run:
+        working-directory: app
     steps:
       - uses: actions/checkout@v4
 
@@ -19,6 +23,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - run: npm ci
       - run: npm run typecheck
@@ -29,6 +34,6 @@ jobs:
         with:
           name: trackdesk-${{ github.sha }}
           path: |
-            release/*.zip
-            release/*.xpi
+            app/release/*.zip
+            app/release/*.xpi
           retention-days: 14

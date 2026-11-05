@@ -1,5 +1,5 @@
 // Текст релиза на GitHub: раздел CHANGELOG.md для версии и как установить.
-// node scripts/release-notes.mjs 0.6.5 > notes.md
+// node scripts/release-notes.mjs 0.6.5 > notes.md   (из папки app; CHANGELOG.md — в корне репозитория)
 import { readFileSync } from 'node:fs';
 
 const version = process.argv[2];
@@ -8,7 +8,7 @@ if (!version) {
   process.exit(1);
 }
 
-const lines = readFileSync('CHANGELOG.md', 'utf-8').split(/\r?\n/);
+const lines = readFileSync(new URL('../../CHANGELOG.md', import.meta.url), 'utf-8').split(/\r?\n/);
 const start = lines.findIndex((l) => l === `## ${version}` || l.startsWith(`## ${version} `));
 if (start < 0) {
   console.error(`В CHANGELOG.md нет раздела «## ${version}»`);

@@ -3,6 +3,7 @@ import { build } from 'esbuild';
 import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { deflateRawSync, crc32 } from 'node:zlib';
 import { join, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 /** Упаковать папку в zip (для .xpi и .zip), без внешних программ. */
 function zipDir(dir, file) {
@@ -65,15 +66,18 @@ mkdirSync('release', { recursive: true });
 mkdirSync('latest', { recursive: true });
 for (const [name, manifest] of Object.entries(targets)) {
   const out = join('dist', name);
+  // Страница — React + shadcn/ui; фон — без React. Алиас «@/» берётся из tsconfig.json
   await build({
-    entryPoints: { background: 'src/background.ts', app: 'src/app/app.ts' },
+    entryPoints: { background: 'src/background.ts', app: 'src/app/main.tsx' },
     outdir: out, bundle: true, format: 'iife', target: ['firefox115', 'chrome116'], charset: 'utf8',
-    define: { __VERSION__: JSON.stringify(version) }, logLevel: 'warning',
+    jsx: 'automatic', minify: true, legalComments: 'none',
+    define: { __VERSION__: JSON.stringify(version), 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning',
   });
   const p = join(out, 'app.js');
   writeFileSync(p, readFileSync(p, 'utf-8').replaceAll('__VERSION__', version));
   cpSync('src/app/app.html', join(out, 'app.html'));
-  cpSync('src/app/app.css', join(out, 'app.css'));
+  // Стили: Tailwind v4 собирает только используемые классы
+  execFileSync(join('node_modules', '.bin', 'tailwindcss'), ['-i', 'src/app/globals.css', '-o', join(out, 'app.css'), '--minify'], { stdio: ['ignore', 'ignore', 'inherit'] });
   cpSync('src/icons', join(out, 'icons'), { recursive: true });
   writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
   const file = name === 'firefox' ? `TrackDesk-${version}-firefox.xpi` : `TrackDesk-${version}-chromium.zip`;
