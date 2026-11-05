@@ -1,0 +1,14 @@
+# Зависимости и промежуточная сборка
+node_modules/
+dist/
+
+# Сборки — только на диске; готовые пакеты публикуются в GitHub Releases
+release/
+latest/
+
+# Реальные выгрузки задач
+export/
+
+# Служебные файлы macOS и локальный lock-файл bun (в репозитории — package-lock.json для npm ci)
+.DS_Store
+bun.lock

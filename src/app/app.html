@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TrackDesk</title>
+  <link rel="icon" href="icons/icon32.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><img src="icons/icon32.png" alt="" width="20" height="20"> TrackDesk <span class="ver" id="ver"></span></div>
+    <div class="conn" id="conn" data-state="busy"><span class="dot"></span><span id="connText">Подключение…</span></div>
+    <div class="spacer"></div>
+    <button class="ghost" id="btnOpenYt" title="Открыть YouTrack в новой вкладке">YouTrack ↗</button>
+    <button class="ghost" id="btnSettings" title="Вход и токен">Настройки</button>
+    <button class="ghost icon" id="btnTheme" title="Тема: как в системе / светлая / тёмная">◐</button>
+  </header>
+
+  <div class="notice" id="notice" hidden><div class="nbody" id="noticeBody"></div><div class="nbtns" id="noticeBtns"></div></div>
+
+  <section class="card filters">
+    <div class="row">
+      <label class="fld grow2"><span>Сотрудник</span>
+        <div class="inline">
+          <select id="mode" title="Исполнитель — задачи, где он исполнитель сейчас.&#10;Участник — ещё и задачи, где он был исполнителем раньше, менял задачу (например, перевёл в тестирование) или комментировал.">
+            <option value="assignee">исполнитель</option>
+            <option value="participant">участник</option>
+          </select>
+          <input id="assignee" list="usersList" placeholder="Имя или логин" autocomplete="off" spellcheck="false">
+          <button class="ghost icon star" id="btnStar" title="Добавить в команду / убрать">☆</button>
+        </div>
+      </label>
+      <div class="fld"><span>Статус</span>
+        <div class="ms" id="statesMs">
+          <button type="button" class="ms-btn" id="statesBtn" aria-haspopup="listbox" title="Можно выбрать несколько — подойдёт любой из них">
+            <span class="ms-text" id="statesText"></span><span class="caret">▾</span>
+          </button>
+          <div class="ms-pop" id="statesPop" hidden>
+            <div class="ms-list" id="statesOpts" role="listbox" aria-multiselectable="true"></div>
+            <div class="ms-add">
+              <input id="statesAdd" placeholder="Другой статус…" autocomplete="off" spellcheck="false">
+              <button type="button" class="ghost small" id="statesAddBtn">Добавить</button>
+            </div>
+            <div class="ms-foot">
+              <button type="button" class="ghost small" id="statesClear">Любой статус</button>
+              <button type="button" class="primary small" id="statesDone">OK</button>
+            </div>
+          </div>
+          <input type="hidden" id="states" value="Готово">
+        </div>
+      </div>
+      <label class="fld"><span>Проект</span>
+        <input id="project" list="projectsList" placeholder="Все проекты" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="fld"><span>Тип</span>
+        <input id="types" placeholder="Любой" title="Можно несколько через запятую: Frontend, Mobile" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="fld"><span>Тег</span>
+        <input id="tags" placeholder="Любой" title="Можно несколько через запятую — любой из них" autocomplete="off" spellcheck="false">
+      </label>
+    </div>
+    <div class="row">
+      <label class="fld"><span>Период</span>
+        <select id="preset"></select>
+      </label>
+      <label class="fld"><span>с</span><input type="date" id="from"></label>
+      <label class="fld"><span>по</span><input type="date" id="to"></label>
+      <label class="fld"><span>по дате</span>
+        <select id="dateField">
+          <option value="resolved">решения</option><option value="updated">обновления</option><option value="created">создания</option>
+        </select>
+      </label>
+      <label class="check" title="Определить доски и спринты задач — дольше, зато в выгрузке будет доска"><input type="checkbox" id="withBoards" checked> Доски</label>
+      <label class="check" id="wideBox" hidden title="Кроме «исполнитель / был исполнителем» — ещё задачи, где сотрудник менял поля (например, статус) или комментировал"><input type="checkbox" id="wide"> + менял / комментировал</label>
+      <div class="spacer"></div>
+      <button class="primary" id="btnSearch" title="Найти задачи (Enter)">Найти</button>
+    </div>
+    <div class="row team" id="teamRow">
+      <span class="muted">Команда:</span>
+      <div class="chips" id="team"></div>
+      <span class="muted hint" id="teamHint">отметьте ☆ у исполнителя, чтобы он появился здесь</span>
+    </div>
+    <details class="qbox" id="qbox">
+      <summary>Запрос YouTrack <span class="muted" id="qState"></span></summary>
+      <div class="inline">
+        <textarea id="query" rows="2" spellcheck="false"></textarea>
+        <button class="ghost" id="btnResetQuery" title="Собрать запрос заново из полей выше">↺ Из полей</button>
+      </div>
+      <p class="muted small">Язык поиска YouTrack: <code>assignee:</code> — исполнитель, <code>state: {Ревью}, {Готово}</code> — статус (запятая — «или»), <code>type: {…}</code>, <code>tag: {…}</code>, <code>project: {…}</code>. Можно править вручную.</p>
+    </details>
+  </section>
+
+  <main class="split">
+    <section class="card list">
+      <div class="toolbar">
+        <label class="check" title="Отметить все видимые"><input type="checkbox" id="checkAll" checked></label>
+        <span id="summary" class="muted">Выберите исполнителя и нажмите «Найти»</span>
+        <div class="spacer"></div>
+        <input id="filter" placeholder="Фильтр по найденным…" autocomplete="off" spellcheck="false">
+        <button class="ghost" id="btnCopyAi" disabled title="Открыть чат с моделью: отмеченные задачи и инструкция для отчёта уже подставлены">✦ Для ИИ</button>
+        <button class="primary" id="btnExport" disabled title="Выгрузить отмеченные задачи (Ctrl+S)">Выгрузить…</button>
+      </div>
+      <div class="progress" id="progress" hidden><div class="bar" id="bar"></div><span id="progressText"></span><div class="spacer"></div><button class="ghost small" id="btnStopShow" hidden title="Остановить проверку истории и показать задачи, найденные к этому моменту">Показать найденное</button><button class="ghost small" id="btnCancel" title="Прервать поиск">Отмена</button></div>
+      <div class="tablewrap">
+        <table id="table">
+          <thead><tr>
+            <th class="c-check"></th>
+            <th data-sort="key" class="c-key">Ключ</th>
+            <th data-sort="summary">Название</th>
+            <th data-sort="state" class="c-state">Статус</th>
+            <th data-sort="project" class="c-project">Проект</th>
+            <th data-sort="boards" class="c-boards">Доски</th>
+            <th class="c-tags">Теги</th>
+            <th class="c-roles">Участие</th>
+            <th data-sort="resolved" class="c-date">Решена</th>
+            <th data-sort="comments" class="c-num" title="Комментарии">💬</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="empty" id="empty"></div>
+      </div>
+    </section>
+    <aside class="card side">
+      <div class="tabs" role="tablist">
+        <button data-tab="detail" role="tab" class="on">☰ Детали</button>
+        <button data-tab="ai" role="tab">✦ ИИ</button>
+      </div>
+      <div class="detail pane" id="detail">
+        <div class="empty">Щёлкните задачу, чтобы увидеть описание и комментарии</div>
+      </div>
+      <div class="pane ai" id="aiPane" hidden>
+        <div class="ai-head">
+          <select id="aiModel" disabled title="Модель chat.office.lan"><option>Модели загружаются…</option></select>
+          <div class="spacer"></div>
+          <button class="ghost small" id="aiCopyData" title="Скопировать инструкцию и данные задач — вставить в чат вручную">Копировать данные</button>
+          <button class="ghost small" id="aiNew" title="Начать разговор заново с теми же задачами">Новый разговор</button>
+        </div>
+        <div class="ai-ctx" id="aiCtx"></div>
+        <div class="ai-opts">
+          <span class="muted">В данных:</span>
+          <label class="check"><input type="checkbox" id="aiDesc" checked> описания</label>
+          <label class="check"><input type="checkbox" id="aiComments" checked> комментарии</label>
+        </div>
+        <div class="ai-goal">
+          <span class="muted">Цель:</span>
+          <div class="seg" id="aiGoal" role="radiogroup">
+            <button type="button" data-v="report" class="on" title="Отчёт руководителю по задачам">Отчёт</button>
+            <button type="button" data-v="promo" title="Краткий текст для колонки «Письменное обоснование пересмотра» в Google-таблице: польза, умения, почему повысить">Обоснование повышения</button>
+          </div>
+          <div class="spacer"></div>
+          <button class="ghost small" id="aiRegen" hidden title="Текст запроса правили вручную — собрать заново по цели и полям">↺ Собрать текст заново</button>
+        </div>
+        <div class="ai-promo" id="aiPromo" hidden>
+          <div class="pair">
+            <label class="line"><span>Текущий грейд</span><input id="promoFrom" placeholder="например, Middle" autocomplete="off"></label>
+            <label class="line"><span>Целевой грейд</span><input id="promoTo" placeholder="например, Senior" autocomplete="off"></label>
+          </div>
+          <label class="line"><span>Описание сотрудника <span class="muted" id="promoWho"></span></span>
+            <textarea id="promoAbout" rows="3" placeholder="Роль в команде, сильные стороны, чем отличился, что важно подчеркнуть для комиссии…"></textarea>
+          </label>
+          <p class="muted small">Грейды и описание запоминаются для этого сотрудника.</p>
+        </div>
+        <div class="ai-notice" id="aiNotice" hidden></div>
+        <div class="ai-thread" id="aiThread"></div>
+        <div class="ai-input">
+          <textarea id="aiInput" rows="5" spellcheck="false" placeholder="Что сделать с задачами? (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+          <div class="ai-btns">
+            <button class="primary" id="aiSend">Отправить</button>
+            <button class="ghost" id="aiStop" hidden>Стоп</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <datalist id="usersList"></datalist>
+  <datalist id="projectsList"></datalist>
+
+  <dialog id="dlgExport">
+    <form method="dialog">
+      <h3>Выгрузка задач</h3>
+      <p class="muted" id="exportCount"></p>
+      <div class="seg" id="format" role="radiogroup">
+        <button type="button" data-v="md" title="Лучше всего подходит для загрузки в модель">Markdown</button>
+        <button type="button" data-v="json">JSON</button>
+        <button type="button" data-v="csv" title="Открывается в Excel">CSV (Excel)</button>
+        <button type="button" data-v="txt" title="Как в скрипте YoutrackReportByUser: «- KEY: название (Описание: …)»">TXT</button>
+      </div>
+      <label class="check"><input type="checkbox" id="optDesc" checked> Описание</label>
+      <label class="check"><input type="checkbox" id="optComments" checked> Комментарии</label>
+      <label class="check"><input type="checkbox" id="optFields" checked> Все поля задачи (тип, приоритет, время…)</label>
+      <label class="check"><input type="checkbox" id="optPrompt"> Инструкция для модели в начале</label>
+      <div class="btns">
+        <button type="button" class="ghost" id="exportCopy">Копировать</button>
+        <button type="button" class="primary" id="exportSave">Скачать файл</button>
+        <button value="cancel" class="ghost">Закрыть</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlgSettings">
+    <form method="dialog">
+      <h3>Вход в YouTrack</h3>
+      <p>TrackDesk сначала пробует вашу сессию браузера: если вы вошли в <b>youtrack.office.lan</b>, ничего настраивать не нужно.</p>
+      <p>Если YouTrack не пускает — создайте постоянный токен: YouTrack → ваш профиль → <b>Безопасность аккаунта</b> →
+        <b>Новый токен</b> (область — YouTrack), и вставьте его сюда. Токен хранится только в этом браузере.</p>
+      <label class="line"><span>Токен</span><input type="password" id="token" placeholder="perm:…" autocomplete="off" spellcheck="false"></label>
+      <p class="muted small" id="settingsStatus"></p>
+      <label class="line"><span>Как искать исполнителя</span>
+        <select id="assigneeAttr">
+          <option value="assignee">assignee: {логин} — как в YouTrack</option>
+          <option value="for">for: {логин}</option>
+          <option value="Исполнитель">Исполнитель: {логин}</option>
+        </select>
+      </label>
+      <div class="btns">
+        <button type="button" class="ghost" id="btnProfile">Открыть профиль ↗</button>
+        <button type="button" class="ghost" id="btnTokenClear">Убрать токен</button>
+        <button type="button" class="primary" id="btnTokenSave">Сохранить и проверить</button>
+        <button value="cancel" class="ghost">Закрыть</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

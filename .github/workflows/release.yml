@@ -1,0 +1,64 @@
+# Релиз: проверка, сборка и GitHub Release с пакетами для Chrome и Firefox.
+# Запуск — тегом vX.Y.Z (git tag v0.6.5 && git push origin v0.6.5) или кнопкой «Run workflow» во вкладке Actions:
+# тогда версия берётся из package.json, а тег создаётся сам. Описание релиза — раздел этой версии из CHANGELOG.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Версия
+        id: v
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_NAME" != "$TAG" ]; then
+            echo "::error::Тег $GITHUB_REF_NAME не совпадает с версией в package.json ($TAG)"
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Релиз $TAG уже есть — поднимите версию в package.json и добавьте раздел в CHANGELOG.md"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Описание релиза из CHANGELOG.md
+        run: node scripts/release-notes.mjs "${{ steps.v.outputs.version }}" > notes.md
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            "release/TrackDesk-$VERSION-chromium.zip" \
+            "release/TrackDesk-$VERSION-firefox.xpi" \
+            --title "TrackDesk $VERSION" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA"
