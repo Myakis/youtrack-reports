@@ -1,17 +1,17 @@
 // ИИ-чат в YouTrack Reports: разбор найденных задач корпоративной нейросетью chat.office.lan (Open WebUI), как в LogDesk.
 // Вход — по cookie «token» вашей сессии в chat.office.lan; разговор идёт внутри YouTrack Reports.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { CopyIcon, RotateCcwIcon, SendIcon, SquareIcon } from 'lucide-react';
+import { ChevronRightIcon, CopyIcon, PinIcon, RotateCcwIcon, SendIcon, SettingsIcon, SquareIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import { api, inExtension } from '../../shared';
-import { promoPrompt, reportPrompt, type Goal } from '../../core/prompts';
+import { defaultTemplate, GOAL_ABOUT, GOAL_GROUPS, GOAL_NAMES, GOALS, goalPrompt, isGoal, PROMPT_VARS, type AiGoal, type Goal } from '../../core/prompts';
 import { md, stripReasoning } from '../md';
 import { store } from '../lib/storage';
 import { copyText, num, openUrl } from '../lib/net';
@@ -109,7 +109,11 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   const [models, setModels] = useState<Model[]>([]);
   const [model, setModel] = useState('');
   const limits = useRef(new Map<string, number>());
-  const [goal, setGoalState] = useState<Goal>('report');
+  const [goal, setGoalState] = useState<AiGoal>('report');
+  // Закреплённые свои промпты целей; черновик — то, что сейчас в редакторе промпта
+  const [custom, setCustom] = useState<Partial<Record<Goal, string>>>({});
+  const [draft, setDraft] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [promo, setPromo] = useState<Promo>({ from: '', to: '', about: '' });
   const [opts, setOpts] = useState({ description: true, comments: true });
   const [input, setInput] = useState('');
@@ -127,9 +131,8 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   const locked = turns.length > 0;
   const promoKey = 'promo.' + (data?.person.login || '_');
 
-  const promptFor = useCallback((g: Goal, p: Promo) => (g === 'report' || !data
-    ? reportPrompt()
-    : promoPrompt({ name: data.person.name, period: data.period, count: data.count, ...p })), [data]);
+  const promptFor = useCallback((g: AiGoal, p: Promo, c: Partial<Record<Goal, string>> = custom) =>
+    goalPrompt(g, c, { name: data?.person.name || 'сотрудник', period: data?.period, count: data?.count ?? 0, ...p }), [data, custom]);
 
   // ---------- Уведомления ----------
   const handleAccess = useCallback((e: unknown, retry: () => void): boolean => {
@@ -207,10 +210,15 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   }, []);
 
   // Цель — запоминается между запусками
-  useEffect(() => { store.get<Goal>('aiGoal', 'report').then(setGoalState); }, []);
+  useEffect(() => {
+    store.get<AiGoal>('aiGoal', 'report').then((g) => setGoalState(isGoal(g) ? g : 'report'));
+    store.get<Partial<Record<Goal, string>>>('aiPrompts', {}).then(setCustom);
+  }, []);
+  // В редакторе — свой промпт цели или стандартный
+  useEffect(() => { if (goal !== 'none') setDraft(custom[goal] ?? defaultTemplate(goal)); }, [goal, custom]);
 
   // ---------- Новый разговор по таблице ----------
-  const reset = useCallback((g: Goal, p: Promo) => {
+  const reset = useCallback((g: AiGoal, p: Promo) => {
     abortCtl.current?.abort();
     messages.current = [];
     setTurns([]);
@@ -237,13 +245,23 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   }, [request?.n]);
 
   /** Пересобрать текст запроса, если разговор не начат и текст не правили руками. */
-  const regenerate = (g: Goal, p: Promo, force = false) => {
+  const regenerate = (g: AiGoal, p: Promo, force = false, c = custom) => {
     if (messages.current.length || (inputEdited && !force)) return;
-    setInput(promptFor(g, p));
+    setInput(promptFor(g, p, c));
     setInputEdited(false);
   };
 
-  const setGoal = (g: Goal) => {
+  /** Закрепить свой промпт цели (пустой или стандартный — значит, без своего). */
+  const savePrompt = (g: Goal, text: string | null) => {
+    const c = { ...custom };
+    if (text == null || !text.trim() || text.trim() === defaultTemplate(g).trim()) delete c[g];
+    else c[g] = text;
+    setCustom(c);
+    store.set('aiPrompts', c);
+    regenerate(goal, promo, false, c);
+  };
+
+  const setGoal = (g: AiGoal) => {
     setGoalState(g);
     store.set('aiGoal', g);
     regenerate(g, promo);
@@ -347,7 +365,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   const copyData = async () => {
     if (!data) return;
     const prompt = messages.current.length ? promptFor(goal, promo) : input.trim() || promptFor(goal, promo);
-    if (await copyText(`${prompt}\n\n---\n\n${data.build(opts)}`)) setCopied('data');
+    if (await copyText(prompt ? `${prompt}\n\n---\n\n${data.build(opts)}` : data.build(opts))) setCopied('data');
   };
   const [copied, setCopiedState] = useState<string | number | null>(null);
   const setCopied = (k: string | number) => { setCopiedState(k); setTimeout(() => setCopiedState(null), 1500); };
@@ -366,7 +384,8 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2.5 p-3">
+    // Сжимаются только настройки (прокрутка внутри) и разговор; поле ввода всегда внизу
+    <div className="flex h-full min-h-0 flex-col gap-2.5 p-3 [&>*]:shrink-0">
       <div className="flex items-center gap-2">
         <Select value={model} onValueChange={(v) => { setModel(v); store.set('aiModel', v); }} disabled={!models.length}>
           <SelectTrigger size="sm" className="h-8 max-w-56" title="Модель chat.office.lan">
@@ -397,38 +416,87 @@ export function AiPanel({ request, shown }: AiPanelProps) {
         </Label>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-muted-foreground">Цель:</span>
-        <ToggleGroup type="single" variant="outline" size="sm" value={goal} disabled={locked} onValueChange={(v) => v && setGoal(v as Goal)}>
-          <ToggleGroupItem value="report" className="h-7 px-3 text-xs" title="Отчёт руководителю по задачам">Отчёт</ToggleGroupItem>
-          <ToggleGroupItem value="promo" className="h-7 px-3 text-xs" title="Краткий текст для колонки «Письменное обоснование пересмотра» в Google-таблице">Обоснование повышения</ToggleGroupItem>
-        </ToggleGroup>
-        <div className="flex-1" />
-        {inputEdited && !locked && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => regenerate(goal, promo, true)} title="Текст запроса правили вручную — собрать заново по цели и полям">
-            <RotateCcwIcon /> Собрать текст заново
-          </Button>
-        )}
-      </div>
-
-      {goal === 'promo' && (
-        <div className="flex flex-col gap-2 rounded-md bg-muted p-2.5">
-          <div className="flex gap-2">
-            <Label className="flex flex-1 flex-col items-stretch gap-1 text-xs font-normal text-muted-foreground">Текущий грейд
-              <Input className="h-8 bg-background" placeholder="например, Middle" value={promo.from} disabled={locked} onChange={(e) => changePromo({ from: e.target.value })} />
-            </Label>
-            <Label className="flex flex-1 flex-col items-stretch gap-1 text-xs font-normal text-muted-foreground">Целевой грейд
-              <Input className="h-8 bg-background" placeholder="например, Senior" value={promo.to} disabled={locked} onChange={(e) => changePromo({ to: e.target.value })} />
-            </Label>
-          </div>
-          <Label className="flex flex-col items-stretch gap-1 text-xs font-normal text-muted-foreground">
-            <span>Описание сотрудника {data && <span>· {data.person.name}</span>}</span>
-            <Textarea rows={3} className="min-h-14 bg-background" disabled={locked} value={promo.about} onChange={(e) => changePromo({ about: e.target.value })}
-              placeholder="Роль в команде, сильные стороны, чем отличился, что важно подчеркнуть для комиссии…" />
-          </Label>
-          <p className="text-xs text-muted-foreground">Грейды и описание запоминаются для этого сотрудника.</p>
+      <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen} className="flex min-h-[2.375rem] !shrink flex-col overflow-hidden rounded-md border">
+        <div className="flex shrink-0 items-center gap-2 px-2 py-1">
+          <CollapsibleTrigger className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs hover:bg-accent">
+            <ChevronRightIcon className={cn('size-3.5 transition-transform', settingsOpen && 'rotate-90')} />
+            <SettingsIcon className="size-3.5" /> Настройки
+          </CollapsibleTrigger>
+          <span className="truncate text-xs text-muted-foreground">
+            цель: {GOAL_NAMES[goal]}{goal !== 'none' && custom[goal] ? ' · свой промпт' : ''}
+          </span>
+          <div className="flex-1" />
+          {inputEdited && !locked && goal !== 'none' && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => regenerate(goal, promo, true)} title="Текст запроса правили вручную — собрать заново по цели и полям">
+              <RotateCcwIcon /> Собрать текст заново
+            </Button>
+          )}
         </div>
-      )}
+        <CollapsibleContent className="flex min-h-0 flex-col gap-2.5 overflow-auto border-t p-2.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Цель:</span>
+            <Select value={goal} disabled={locked} onValueChange={(v) => setGoal(v as AiGoal)}>
+              <SelectTrigger size="sm" className="h-7 w-56 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[60vh]">
+                {GOAL_GROUPS.map((g, i) => (
+                  <SelectGroup key={g.label || 'none'}>
+                    {i > 0 && <SelectSeparator />}
+                    {g.label && <SelectLabel className="text-[11px]">{g.label}</SelectLabel>}
+                    {g.goals.map((x) => <SelectItem key={x.v} value={x.v} className="text-xs" title={x.hint}>{x.name}</SelectItem>)}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="min-w-0 flex-1 basis-48 text-[11px] text-muted-foreground">{GOALS.find((g) => g.v === goal)?.hint}</span>
+          </div>
+
+          {goal === 'none' ? (
+            <p className="text-xs text-muted-foreground">Без готового запроса: напишите вопрос сами — данные отмеченных задач приложатся к первому сообщению.</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Промпт цели «{GOAL_NAMES[goal]}»</span>
+                <span className={cn('rounded px-1.5 text-[11px]', custom[goal] ? 'bg-selected text-primary' : 'bg-muted text-muted-foreground')}>
+                  {custom[goal] ? 'свой' : 'стандартный'}
+                </span>
+              </div>
+              <Textarea rows={6} spellCheck={false} className="max-h-[40vh] min-h-24 text-xs leading-relaxed" value={draft} onChange={(e) => setDraft(e.target.value)} />
+              <p className="text-[11px] text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono">
+                Подстановки: {PROMPT_VARS.map((v, i) => <span key={v}>{i ? ' ' : ''}<code>{'{' + v + '}'}</code></span>)}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" className="h-7 text-xs" disabled={draft === (custom[goal] ?? defaultTemplate(goal))} onClick={() => savePrompt(goal, draft)}
+                  title="Закрепить этот промпт за целью — он будет подставляться каждый раз">
+                  <PinIcon /> Сохранить
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs" disabled={!custom[goal] && draft === defaultTemplate(goal)}
+                  onClick={() => { savePrompt(goal, null); setDraft(defaultTemplate(goal)); }} title="Вернуть стандартный промпт цели">
+                  <RotateCcwIcon /> Стандартный
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {goal !== 'none' && GOAL_ABOUT[goal] && (
+            <div className="flex flex-col gap-2 rounded-md bg-muted p-2.5">
+              {goal === 'promo' && <div className="flex gap-2">
+                <Label className="flex flex-1 flex-col items-stretch gap-1 text-xs font-normal text-muted-foreground">Текущий грейд
+                  <Input className="h-8 bg-background" placeholder="например, Middle" value={promo.from} disabled={locked} onChange={(e) => changePromo({ from: e.target.value })} />
+                </Label>
+                <Label className="flex flex-1 flex-col items-stretch gap-1 text-xs font-normal text-muted-foreground">Целевой грейд
+                  <Input className="h-8 bg-background" placeholder="например, Senior" value={promo.to} disabled={locked} onChange={(e) => changePromo({ to: e.target.value })} />
+                </Label>
+              </div>}
+              <Label className="flex flex-col items-stretch gap-1 text-xs font-normal text-muted-foreground">
+                <span>{GOAL_ABOUT[goal]!.label} {data && <span>· {data.person.name}</span>}</span>
+                <Textarea rows={3} className="min-h-14 bg-background" disabled={locked} value={promo.about} onChange={(e) => changePromo({ about: e.target.value })}
+                  placeholder={GOAL_ABOUT[goal]!.placeholder} />
+              </Label>
+              <p className="text-xs text-muted-foreground">{goal === 'promo' ? 'Грейды и описание' : 'Текст'} запоминается для этого сотрудника{goal === 'promo' ? '' : ' (общий с описанием для повышения)'}; пустой — не попадёт в запрос.</p>
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
 
       {notice && (
         <div className="rounded-md bg-warn-bg px-3 py-2 text-[12.5px] text-warn [&_code]:font-mono [&_code]:text-xs">
@@ -441,7 +509,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
         </div>
       )}
 
-      <div ref={threadRef} className="flex min-h-20 flex-1 flex-col gap-2.5 overflow-auto">
+      <div ref={threadRef} className={cn('flex flex-[1_1_0%] !shrink flex-col gap-2.5 overflow-auto', turns.length ? 'min-h-20' : 'min-h-0')}>
         {turns.map((t, i) => t.kind === 'q' ? (
           <div key={i} className="max-h-40 max-w-[85%] self-end overflow-auto rounded-xl rounded-br-sm bg-primary/15 px-3 py-2 whitespace-pre-wrap">
             {t.text}
@@ -466,7 +534,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
       </div>
 
       <div className="flex items-end gap-2">
-        <Textarea ref={inputRef} rows={5} spellCheck={false} className="max-h-[40vh] min-h-16 flex-1 resize-y"
+        <Textarea ref={inputRef} rows={5} spellCheck={false} className="max-h-[min(40vh,8.5rem)] min-h-16 flex-1 resize-none"
           placeholder={locked ? PH_NEXT : PH_FIRST} value={input} disabled={busy}
           onChange={(e) => { setInput(e.target.value); if (!messages.current.length) setInputEdited(true); }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
