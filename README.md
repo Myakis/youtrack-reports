@@ -73,6 +73,7 @@ npm run typecheck
 npm test
 npm run build        # app/dist/firefox, app/dist/chromium и пакеты в app/release/
 npm run icons        # пересоздать иконки
+npm run dev          # страница на тестовых данных: http://localhost:8778/app.html, пересборка при изменениях
 ```
 
 Для разработки в Chrome удобно загрузить распакованное расширение прямо из `app/dist/chromium`: после `npm run build`
@@ -82,8 +83,8 @@ npm run icons        # пересоздать иконки
 `import { cn } from "cn"` и ставит пакет `cn` — замените импорт на `@/lib/utils` и удалите пакет (`npm uninstall cn`).
 Цвета — в `app/src/app/globals.css` (переменные shadcn, акцент — фиолетовый).
 
-Страницу можно открыть без расширения на тестовых данных: `python3 -m http.server 8778` из папки `app` →
-`http://localhost:8778/dist/firefox/app.html`.
+Страница без расширения, на тестовых данных: `npm run dev` (или `bun run dev`) → `http://localhost:8778/app.html`.
+Код и стили пересобираются при сохранении — обновите страницу. Порт можно сменить: `PORT=9000 npm run dev`.
 
 ## Релиз
 
