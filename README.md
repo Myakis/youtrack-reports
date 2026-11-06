@@ -56,7 +56,9 @@ YouTrack → профиль → «Безопасность аккаунта» �
   Запрос: `assignee: {логин} state: {Ревью}, {Готово} type: {…} tag: {…} resolved date: …`.
 - Доски: в REST у задачи нет поля «доска», поэтому берутся доски (`/api/agiles`) проектов найденных задач
   и состав их спринтов. Доска без спринтов подписывается просто названием, со спринтами — «Доска / Спринт».
-- `app/src/core/participation.ts` — поиск по участию: история поля «Исполнитель» у каждой задачи фильтра (до 3 000 задач).
+- `app/src/core/participation.ts` — поиск по участию: история поля «Исполнитель» по всему фильтру одним потоком
+  (`/api/activities?issueQuery=…`, до 50 000 задач). Если YouTrack так не умеет — у каждой задачи отдельно
+  (`/api/issues/{id}/activities`), как в скрипте, до 3 000 задач.
 - `app/src/core/export.ts` — Markdown / JSON / CSV / TXT; `app/src/core/prompts.ts` — запросы к модели.
 - Интерфейс — React + [shadcn/ui](https://ui.shadcn.com) (Radix, Tailwind v4): `app/src/app/App.tsx` — страница и поиск,
   `app/src/app/components/` — фильтры, таблица, детали, ИИ-чат (`AiPanel.tsx`), окна; `app/src/components/ui/` — компоненты shadcn.
@@ -71,9 +73,9 @@ cd app
 npm ci
 npm run typecheck
 npm test
+npm run dev          # страница на тестовых данных: http://localhost:8778/app.html, пересборка при изменениях
 npm run build        # app/dist/firefox, app/dist/chromium и пакеты в app/release/
 npm run icons        # пересоздать иконки
-npm run dev          # страница на тестовых данных: http://localhost:8778/app.html, пересборка при изменениях
 ```
 
 Для разработки в Chrome удобно загрузить распакованное расширение прямо из `app/dist/chromium`: после `npm run build`

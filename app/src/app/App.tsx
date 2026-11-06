@@ -338,8 +338,13 @@ export function App() {
         } finally {
           setStopShow(null);
         }
-        if (r.stopped) stoppedNote = <p><b>Остановлено:</b> история проверена у {num(r.checked)} из {num(Math.min(r.all, 3000))} задач фильтра. В таблице — задачи из проверенной части и все, где сотрудник исполнитель сейчас.</p>;
-        else if (r.truncated) stoppedNote = <p><b>В фильтре больше {num(r.checked)} задач</b> — история просмотрена только у первых {num(r.checked)}. Укажите проект (а при необходимости тип и тег), как в скрипте, или сузьте период.</p>;
+        if (r.stopped) {
+          stoppedNote = r.mode === 'stream'
+            ? <p><b>Остановлено:</b> просмотрено {num(r.scanned)} записей истории фильтра. В таблице — что нашлось к этому моменту и все задачи, где сотрудник исполнитель сейчас.</p>
+            : <p><b>Остановлено:</b> история проверена у {num(r.checked)} из {num(Math.min(r.all, r.limit))} задач фильтра. В таблице — задачи из проверенной части и все, где сотрудник исполнитель сейчас.</p>;
+        } else if (r.truncated) {
+          stoppedNote = <p><b>В фильтре больше {num(r.limit)} задач</b> — история просмотрена только у первых {num(r.limit)}. Укажите проект (а при необходимости тип и тег) или сузьте период.</p>;
+        }
         const keys = [...r.roles.keys()];
         prog(`Загрузка задач: 0 из ${num(keys.length)}…`, 0.72);
         found = await issuesByKeys(yt, YOUTRACK, keys, { signal, onProgress: (n) => prog(`Загрузка задач: ${num(n)} из ${num(keys.length)}…`, 0.72 + 0.1 * n / Math.max(1, keys.length)) });
