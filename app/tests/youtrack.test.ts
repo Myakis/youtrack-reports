@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attachBoards, badParts, buildQuery, knownStates, queryParts, withoutPeriod, dropEach, findAssigneeAttr, fieldValue, getJson, normalizeIssue, searchIssues, YtError, type Fetcher } from '../src/core/youtrack';
+import { attachBoards, attachSwimlanes, parseSwimlanes, badParts, buildQuery, knownStates, queryParts, withoutPeriod, dropEach, findAssigneeAttr, fieldValue, getJson, normalizeIssue, searchIssues, YtError, type Fetcher } from '../src/core/youtrack';
 import { fileName, toCSV, toJSON, toMarkdown } from '../src/core/export';
 import { periodLabel, presetRange } from '../src/core/period';
 import { mockFetch } from '../src/app/mock';
@@ -172,6 +172,26 @@ describe('searchIssues + attachBoards', () => {
     const b = Object.fromEntries(list.map((i) => [i.key, i.boards.sort()]));
     expect(b['CD-101']).toEqual(['CashDash Kanban', 'Mobile Scrum / Спринт 42']);
     expect(b['MOB-103']).toEqual(['Mobile Scrum / Спринт 41']);
+  });
+  it('свимлейны: по эпику-родителю и по полю; на двух досках — с названием доски', async () => {
+    const list = await searchIssues(mockFetch, BASE, 'assignee: {a.ivanova} state: {Готово}');
+    const onBoard = await attachBoards(mockFetch, list);
+    await attachSwimlanes(mockFetch, list, onBoard);
+    const s = Object.fromEntries(list.map((i) => [i.key, i.swimlanes.sort()]));
+    expect(s['CD-101']).toEqual(['CashDash Kanban / Algeria (CD-107)', 'Mobile Scrum / Обычный']);
+    expect(s['CD-102']).toEqual(['Algeria (CD-107)']);
+    expect(s['MOB-103']).toEqual(['Обычный']);
+  });
+  it('parseSwimlanes и родитель из связи Subtask', () => {
+    expect(parseSwimlanes({ $type: 'IssueBasedSwimlaneSettings', enabled: true, field: { name: 'Type' }, values: [{ name: 'Epic' }] }))
+      .toEqual({ by: 'issue', field: 'Type', values: ['Epic'] });
+    expect(parseSwimlanes({ $type: 'AttributeBasedSwimlaneSettings', enabled: false, field: { name: 'Priority' } })).toBeNull();
+    expect(parseSwimlanes(null)).toBeNull();
+    const i = normalizeIssue({ idReadable: 'P-2', links: [
+      { direction: 'INWARD', linkType: { name: 'Subtask', targetToSource: 'subtask of' }, issues: [{ idReadable: 'P-1' }] },
+      { direction: 'OUTWARD', linkType: { name: 'Subtask', sourceToTarget: 'parent for' }, issues: [{ idReadable: 'P-3' }] },
+    ] }, BASE);
+    expect(i.parents).toEqual(['P-1']);
   });
 });
 

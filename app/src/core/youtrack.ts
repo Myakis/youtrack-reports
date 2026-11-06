@@ -222,6 +222,9 @@ export interface Issue {
   projectKey: string;
   tags: string[];
   boards: string[];       // «Доска» или «Доска / Спринт»
+  swimlanes: string[];    // свимлейн на доске: «Algeria (PRJ-5270)» или значение поля; на нескольких досках — «Доска / …»
+  parents: string[];      // ключи родительских задач («подзадача для»)
+  spent: number | null;   // минуты по записям учёта времени (сотрудника или всех); null — не загружали
   state: string;
   assignee: string;
   reporter: string;
@@ -246,6 +249,13 @@ export const ISSUE_FIELDS = [
 
 const STATE_NAMES = ['state', 'состояние', 'статус', 'status'];
 export const ASSIGNEE_NAMES = ['assignee', 'исполнитель'];
+
+/** Связь «подзадача для»: у дочерней задачи связь типа Subtask входящая. */
+function isParentLink(l: any): boolean {
+  const t = l.linkType || {};
+  const subtask = String(t.name || '').toLowerCase() === 'subtask' || /subtask of|подзадача/i.test(String(t.targetToSource || ''));
+  return subtask && l.direction === 'INWARD';
+}
 
 /** Значение поля задачи строкой. */
 export function fieldValue(type: string, v: any): string {
@@ -275,10 +285,12 @@ export function normalizeIssue(raw: any, base: string): Issue {
     if (!assignee && ASSIGNEE_NAMES.includes(n)) assignee = val;
   }
   const links: Link[] = [];
+  const parents: string[] = [];
   for (const l of raw.links || []) {
     const keys = (l.issues || []).map((i: any) => i.idReadable).filter(Boolean);
     if (!keys.length) continue;
     const t = l.linkType || {};
+    if (isParentLink(l)) parents.push(...keys);
     links.push({ type: (l.direction === 'INWARD' ? t.targetToSource : t.sourceToTarget) || t.name || 'связана', keys });
   }
   return {
@@ -290,6 +302,9 @@ export function normalizeIssue(raw: any, base: string): Issue {
     projectKey: raw.project?.shortName || '',
     tags: (raw.tags || []).map((t: any) => t.name),
     boards: [],
+    swimlanes: [],
+    parents,
+    spent: null,
     state,
     assignee,
     reporter: raw.reporter?.fullName || raw.reporter?.login || '',
@@ -328,16 +343,35 @@ export async function searchIssues(
 
 // ---------- Доски ----------
 
-export interface Board { id: string; name: string; projects: string[]; noSprints: boolean; sprints: { id: string; name: string }[] }
+/**
+ * Свимлейны доски: by 'issue' — строки доски это задачи (карточки — их подзадачи), field/values — какие задачи
+ * становятся строками (например, Тип = Эпик); by 'field' — строки это значения поля field.
+ */
+export interface Swimlanes { by: 'issue' | 'field'; field: string; values: string[] }
+export interface Board { id: string; name: string; projects: string[]; noSprints: boolean; sprints: { id: string; name: string }[]; swimlanes?: Swimlanes | null }
+
+export function parseSwimlanes(s: any): Swimlanes | null {
+  if (!s || s.enabled === false) return null;
+  const field = s.field?.customField?.name || s.field?.name || s.field?.presentation || '';
+  const values = (s.values || []).map((v: any) => v?.name || v?.presentation).filter(Boolean);
+  if (/IssueBased/.test(s.$type || '')) return { by: 'issue', field, values };
+  if (/AttributeBased/.test(s.$type || '') && field) return { by: 'field', field, values };
+  return null;
+}
 
 export async function listBoards(f: Fetcher): Promise<Board[]> {
-  const as: any[] = await getJson(f, '/api/agiles?' + qs({ fields: 'id,name,projects(shortName),sprintsSettings(disableSprints),sprints(id,name)', $top: 1000 }));
+  const as: any[] = await getJson(f, '/api/agiles?' + qs({
+    fields: 'id,name,projects(shortName),sprintsSettings(disableSprints),sprints(id,name),'
+      + 'swimlaneSettings($type,enabled,field(name,presentation,customField(name)),values(name,presentation))',
+    $top: 1000,
+  }));
   return as.map((a) => ({
     id: a.id,
     name: a.name,
     projects: (a.projects || []).map((p: any) => p.shortName),
     noSprints: !!a.sprintsSettings?.disableSprints,
     sprints: (a.sprints || []).map((s: any) => ({ id: s.id, name: s.name })),
+    swimlanes: parseSwimlanes(a.swimlaneSettings),
   }));
 }
 
@@ -378,9 +412,11 @@ async function pool<T>(items: T[], n: number, run: (x: T) => Promise<void>) {
 /**
  * Проставить задачам доски: у задачи в REST нет поля «доска», поэтому берём доски проектов этих задач
  * и смотрим, какие задачи лежат в их спринтах. Доска без спринтов — просто «Доска».
+ * Возвращает, на каких досках лежит каждая задача, — для свимлейнов.
  */
-export async function attachBoards(f: Fetcher, issues: Issue[], opts: { signal?: Signal; onProgress?: (done: number, total: number) => void } = {}) {
-  if (!issues.length) return;
+export async function attachBoards(f: Fetcher, issues: Issue[], opts: { signal?: Signal; onProgress?: (done: number, total: number) => void } = {}): Promise<Map<string, Board[]>> {
+  const onBoard = new Map<string, Board[]>();
+  if (!issues.length) return onBoard;
   const byKey = new Map(issues.map((i) => [i.key, i]));
   const projects = new Set(issues.map((i) => i.projectKey));
   const boards = (await listBoards(f)).filter((b) => b.projects.some((p) => projects.has(p)));
@@ -393,7 +429,10 @@ export async function attachBoards(f: Fetcher, issues: Issue[], opts: { signal?:
       const label = b.noSprints || b.sprints.length < 2 ? b.name : `${b.name} / ${s.name}`;
       for (const it of sp.issues || []) {
         const issue = byKey.get(it.idReadable);
-        if (issue && !issue.boards.includes(label)) issue.boards.push(label);
+        if (!issue) continue;
+        if (!issue.boards.includes(label)) issue.boards.push(label);
+        const list = onBoard.get(issue.key) ?? onBoard.set(issue.key, []).get(issue.key)!;
+        if (!list.includes(b)) list.push(b);
       }
     } catch (e) {
       if ((e as YtError).kind === 'auth' && (e as YtError).status !== 403) throw e;
@@ -401,4 +440,61 @@ export async function attachBoards(f: Fetcher, issues: Issue[], opts: { signal?:
     }
     opts.onProgress?.(++done, jobs.length);
   });
+  return onBoard;
+}
+
+/** Ключи → краткие задачи (название и поля), запросом «issue id: …» по 50. Недоступные пропускаются. */
+async function briefIssues(f: Fetcher, keys: string[], signal?: Signal): Promise<Map<string, { summary: string; fields: Record<string, string> }>> {
+  const out = new Map<string, { summary: string; fields: Record<string, string> }>();
+  for (let i = 0; i < keys.length; i += 50) {
+    if (signal?.cancelled) throw new YtError('Отменено');
+    const chunk = keys.slice(i, i + 50);
+    let page: any[] = [];
+    try {
+      page = await getJson(f, '/api/issues?' + qs({ query: 'issue id: ' + chunk.join(', '), fields: 'idReadable,summary,customFields(name,$type,value(name,login,fullName,presentation))', $top: chunk.length }));
+    } catch (e) {
+      if (!isParseError(e)) throw e;   // какой-то ключ YouTrack не знает — без названий для этой пачки
+    }
+    for (const r of page) {
+      const fields: Record<string, string> = {};
+      for (const cf of r.customFields || []) fields[cf.name] = fieldValue(cf.$type || '', cf.value);
+      out.set(r.idReadable, { summary: r.summary || '', fields });
+    }
+  }
+  return out;
+}
+
+/** Совпадает ли значение поля с одним из values (без учёта регистра); пустой values — любое. */
+const matches = (value: string, values: string[]) => !values.length || values.some((v) => v.toLowerCase() === value.trim().toLowerCase());
+
+/**
+ * Проставить задачам свимлейны досок, на которых они лежат (onBoard — из attachBoards).
+ * Свимлейны по задачам: строка — родительская задача («подзадача для»), подходящая под настройку доски.
+ * Свимлейны по полю: строка — значение этого поля у задачи.
+ */
+export async function attachSwimlanes(f: Fetcher, issues: Issue[], onBoard: Map<string, Board[]>, opts: { signal?: Signal } = {}) {
+  const lanesOf = (i: Issue) => (onBoard.get(i.key) || []).filter((b) => b.swimlanes);
+  const parentKeys = [...new Set(issues.flatMap((i) => (lanesOf(i).some((b) => b.swimlanes!.by === 'issue') ? i.parents : [])))];
+  const parents = parentKeys.length ? await briefIssues(f, parentKeys, opts.signal) : new Map();
+  for (const i of issues) {
+    const boards = lanesOf(i);
+    const out: string[] = [];
+    for (const b of boards) {
+      const s = b.swimlanes!;
+      let lane = '';
+      if (s.by === 'issue') {
+        const key = i.parents.find((k) => {
+          const p = parents.get(k);
+          // Строкой становится не любая родительская задача, а подходящая под настройку (например, Тип = Эпик)
+          return p && (!s.field || !(s.field in p.fields) || matches(p.fields[s.field], s.values));
+        });
+        if (key) lane = `${parents.get(key)!.summary || key} (${key})`;
+      } else {
+        const v = i.fields[s.field] || '';
+        if (v && matches(v, s.values)) lane = v;
+      }
+      if (lane) out.push(boards.length > 1 ? `${b.name} / ${lane}` : lane);
+    }
+    i.swimlanes = [...new Set(out)];
+  }
 }

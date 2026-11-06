@@ -1,12 +1,16 @@
 // Выгрузка задач: Markdown (для модели), JSON, CSV (Excel), TXT (как в скрипте YoutrackReportByUser).
 import { fmtDate, type Issue } from './youtrack';
 import { rolesLabel } from './participation';
+import { computeStats, statsLines, type Stats } from './stats';
+import { fmtMinutes } from './time';
 
 export interface ExportMeta {
   assignee: string;     // «Иван Петров (ivan.petrov)»
   query: string;
   period?: string;      // «01.10.2026 – 31.10.2026 (по дате решения)»
   generated: number;
+  /** Сравнение с прошлым периодом — попадает в сводку. */
+  compare?: { stats: Stats; label: string; period: string } | null;
 }
 
 export interface ExportOptions {
@@ -41,6 +45,7 @@ export function toMarkdown(issues: Issue[], meta: ExportMeta, o: ExportOptions =
   if (meta.period) out.push(`- Период: ${meta.period}`);
   out.push(`- Запрос YouTrack: \`${meta.query}\``);
   out.push(`- Выгружено: ${fmtDate(meta.generated)}`, '');
+  if (issues.length) out.push('## Сводка', '', ...statsLines(computeStats(issues), meta.compare).map((l) => '- ' + l), '');
 
   for (const i of issues) {
     out.push(`## ${i.key} — ${i.summary}`, '');
@@ -48,12 +53,14 @@ export function toMarkdown(issues: Issue[], meta: ExportMeta, o: ExportOptions =
     line('Участие сотрудника', rolesLabel(i.roles));
     line('Проект', i.project);
     line('Доски', i.boards.join('; '));
+    line('Свимлейн', i.swimlanes.join('; '));
     line('Теги', i.tags.join(', '));
     line('Статус', i.state);
     line('Исполнитель', i.assignee);
     line('Автор', i.reporter);
     line('Создана', fmtDate(i.created));
     line('Решена', fmtDate(i.resolved));
+    if (i.spent) line('Списано времени', fmtMinutes(i.spent));
     if (o.fields !== false) {
       for (const [k, v] of Object.entries(i.fields)) if (v && !SKIP_FIELDS.has(k.toLowerCase())) line(k, v);
     }
@@ -79,6 +86,8 @@ export function toJSON(issues: Issue[], meta: ExportMeta, o: ExportOptions = {})
     ...(o.description !== false ? { description: i.description } : {}),
     project: i.project,
     boards: i.boards,
+    ...(i.swimlanes.length ? { swimlanes: i.swimlanes } : {}),
+    ...(i.spent != null ? { spentMinutes: i.spent } : {}),
     tags: i.tags,
     state: i.state,
     assignee: i.assignee,
@@ -104,10 +113,16 @@ export function toCSV(issues: Issue[], o: ExportOptions = {}): string {
   if (o.description !== false) head.push('Описание');
   if (o.comments !== false) head.push('Комментарии');
   const withRoles = issues.some((i) => i.roles.length);
+  const withLanes = issues.some((i) => i.swimlanes.length);
+  const withTime = issues.some((i) => i.spent != null);
+  if (withTime) head.splice(head.indexOf('Ссылка'), 0, 'Время, ч');
+  if (withLanes) head.splice(4, 0, 'Свимлейн');
   if (withRoles) head.splice(2, 0, 'Участие');
   const rows = [head];
   for (const i of issues) {
     const r = [i.key, i.summary, i.project, i.boards.join('; '), i.tags.join(', '), i.state, i.assignee, fmtDate(i.created), fmtDate(i.resolved), i.url];
+    if (withTime) r.splice(r.length - 1, 0, i.spent != null ? (Math.round(i.spent / 6) / 10).toLocaleString('ru') : '');
+    if (withLanes) r.splice(4, 0, i.swimlanes.join('; '));
     if (withRoles) r.splice(2, 0, rolesLabel(i.roles));
     if (o.description !== false) r.push(i.description);
     if (o.comments !== false) r.push(i.comments.map((c) => `${c.author}, ${fmtDate(c.created)}: ${c.text}`).join('\n\n'));

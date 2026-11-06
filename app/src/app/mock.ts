@@ -14,13 +14,15 @@ const day = 86400000;
 const now = Date.now();
 const u = (login: string) => ({ login, fullName: users.find((x) => x.login === login)!.fullName });
 
+/** extra.ago — сколько дней назад решена (по умолчанию 3 + n): часть задач в этом месяце, часть — в прошлом. */
 function issue(n: number, project: string, summary: string, who: string, extra: Partial<any> = {}) {
-  const created = now - (40 - n) * day;
+  const resolvedAt = now - (extra.ago ?? 3 + n) * day;
+  const created = resolvedAt - (2 + n) * day;
   return {
     idReadable: `${project}-${100 + n}`,
     summary,
     description: extra.description ?? `Нужно ${summary.toLowerCase()}.\n\n**Критерии готовности:**\n- работает на проде\n- покрыто тестами`,
-    created, updated: created + 3 * day, resolved: created + 3 * day,
+    created, updated: resolvedAt, resolved: extra.state && extra.state !== 'Готово' ? null : resolvedAt,
     reporter: u('m.popov'),
     project: projects.find((p) => p.shortName === project),
     tags: (extra.tags || []).map((name: string) => ({ name })),
@@ -36,20 +38,26 @@ function issue(n: number, project: string, summary: string, who: string, extra: 
   };
 }
 
+// CD-101 и CD-102 — подзадачи эпика CD-107: на доске CashDash Kanban они в его свимлейне
+const subtaskOf = (key: string) => ({ direction: 'INWARD', linkType: { name: 'Subtask', sourceToTarget: 'parent for', targetToSource: 'subtask of' }, issues: [{ idReadable: key }] });
+
 const issues = [
-  issue(1, 'CD', 'Добавить экспорт логов в Excel', 'a.ivanova', { tags: ['экспорт', 'Q4'], spent: '2д 4ч', comments: [['m.popov', 'Колонки — как в таблице.'], ['a.ivanova', 'Сделала, проверьте на стенде.']] }),
-  issue(2, 'CD', 'Исправить падение при пустом SubID', 'a.ivanova', { type: 'Ошибка', prio: 'Критический', tags: ['баг'], comments: [['d.smirnov', 'Воспроизводится на 1.8.6']] }),
-  issue(3, 'MOB', 'Экран истории платежей', 'a.ivanova', { tags: ['UI'], spent: '5д', links: [{ direction: 'OUTWARD', linkType: { name: 'Depend', sourceToTarget: 'зависит от', targetToSource: 'нужна для' }, issues: [{ idReadable: 'CD-101' }] }] }),
-  issue(4, 'CD', 'Ускорить поиск по SubID', 'd.smirnov', { tags: ['производительность'] }),
+  issue(1, 'CD', 'Добавить экспорт логов в Excel', 'a.ivanova', { ago: 2, tags: ['экспорт', 'Q4'], spent: '2д 4ч', links: [subtaskOf('CD-107')], comments: [['m.popov', 'Колонки — как в таблице.'], ['a.ivanova', 'Сделала, проверьте на стенде.']] }),
+  issue(2, 'CD', 'Исправить падение при пустом SubID', 'a.ivanova', { ago: 4, type: 'Ошибка', prio: 'Критический', tags: ['баг'], links: [subtaskOf('CD-107')], comments: [['d.smirnov', 'Воспроизводится на 1.8.6']] }),
+  issue(3, 'MOB', 'Экран истории платежей', 'a.ivanova', { ago: 35, tags: ['UI'], spent: '5д', links: [{ direction: 'OUTWARD', linkType: { name: 'Depend', sourceToTarget: 'зависит от', targetToSource: 'нужна для' }, issues: [{ idReadable: 'CD-101' }] }] }),
+  issue(4, 'CD', 'Ускорить поиск по SubID', 'd.smirnov', { ago: 1, tags: ['производительность'] }),
   issue(5, 'MOB', 'Push-уведомления о статусе платежа', 'd.smirnov', { description: '', state: 'Ревью' }),
   issue(6, 'CD', 'Документация по API для агентов', 'e.kuznetsova', { tags: ['доки'], state: 'Готово к тестированию' }),
+  issue(7, 'CD', 'Algeria', 'm.popov', { type: 'Эпик', state: 'В работе' }),
 ];
 
 const agiles = [
-  { id: '1-1', name: 'CashDash Kanban', projects: [{ shortName: 'CD' }], sprintsSettings: { disableSprints: true }, sprints: [{ id: '2-1', name: 'Kanban' }] },
-  { id: '1-2', name: 'Mobile Scrum', projects: [{ shortName: 'MOB' }, { shortName: 'CD' }], sprintsSettings: { disableSprints: false }, sprints: [{ id: '2-2', name: 'Спринт 41' }, { id: '2-3', name: 'Спринт 42' }] },
+  { id: '1-1', name: 'CashDash Kanban', projects: [{ shortName: 'CD' }], sprintsSettings: { disableSprints: true }, sprints: [{ id: '2-1', name: 'Kanban' }],
+    swimlaneSettings: { $type: 'IssueBasedSwimlaneSettings', enabled: true, field: { name: 'Тип', customField: { name: 'Тип' } }, values: [{ name: 'Эпик' }] } },
+  { id: '1-2', name: 'Mobile Scrum', projects: [{ shortName: 'MOB' }, { shortName: 'CD' }], sprintsSettings: { disableSprints: false }, sprints: [{ id: '2-2', name: 'Спринт 41' }, { id: '2-3', name: 'Спринт 42' }],
+    swimlaneSettings: { $type: 'AttributeBasedSwimlaneSettings', enabled: true, field: { name: 'Приоритет', customField: { name: 'Приоритет' } }, values: [{ name: 'Критический' }, { name: 'Обычный' }] } },
 ];
-const sprintIssues: Record<string, string[]> = { '2-1': ['CD-101', 'CD-102', 'CD-104', 'CD-106'], '2-2': ['MOB-103'], '2-3': ['MOB-105', 'CD-101'] };
+const sprintIssues: Record<string, string[]> = { '2-1': ['CD-101', 'CD-102', 'CD-104', 'CD-106', 'CD-107'], '2-2': ['MOB-103'], '2-3': ['MOB-105', 'CD-101'] };
 
 // История: CD-104 сначала делала Анна, потом передала Дмитрию; MOB-105 Анна перевела в тестирование
 const activities = [
@@ -57,6 +65,23 @@ const activities = [
   { author: { login: 'a.ivanova' }, target: { idReadable: 'MOB-105' }, field: { name: 'Состояние' }, added: [{ name: 'Тестирование' }], removed: [{ name: 'В работе' }] },
   { author: { login: 'm.popov' }, target: { idReadable: 'CD-106' }, field: { name: 'Приоритет' }, added: [{ name: 'Высокий' }], removed: [] },
 ];
+
+// Учёт времени (минуты)
+const workItems = ([
+  ['CD-101', 'a.ivanova', 300], ['CD-101', 'd.smirnov', 60], ['CD-102', 'a.ivanova', 135], ['MOB-103', 'a.ivanova', 480],
+  ['CD-104', 'a.ivanova', 90], ['CD-104', 'd.smirnov', 240], ['MOB-105', 'd.smirnov', 360], ['CD-106', 'e.kuznetsova', 150],
+] as [string, string, number][]).map(([key, login, minutes], k) => ({ date: now - k * day, duration: { minutes }, author: { login }, issue: { idReadable: key } }));
+
+/** Условие периода из запроса: «resolved date: 2026-10-01 .. 2026-10-31». */
+function inPeriod(i: any, q: string): boolean {
+  const m = /(resolved date|updated|created): (\S+) \.\. (\S+)/.exec(q);
+  if (!m) return true;
+  const v = m[1] === 'resolved date' ? i.resolved : m[1] === 'updated' ? i.updated : i.created;
+  if (!v) return false;
+  const d = new Date(v);
+  const s = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return (m[2] === '*' || s >= m[2]) && (m[3] === '*' || s <= m[3]);
+}
 
 const ok = (body: unknown): RawResponse => ({ status: 200, type: 'basic', text: JSON.stringify(body) });
 
@@ -80,9 +105,16 @@ export const mockFetch: Fetcher = async (path) => {
     const prj = /project: \{([^}]+)\}/.exec(q)?.[1];
     const found = issues.filter((i) => (!who || (i.customFields[3].value as { login: string }).login === who)
       && (!commenter || i.comments.some((c: any) => c.author.login === commenter))
-      && (!ids || ids.includes(i.idReadable)) && (!prj || i.project!.shortName === prj));
+      && (!ids || ids.includes(i.idReadable)) && (!prj || i.project!.shortName === prj) && inPeriod(i, q));
     return ok(found.slice(skip, skip + top));
   }
+  if (p === '/api/workItems') {
+    const ids = /issue id: ([^\s,]+(?:,\s*[^\s,]+)*)/.exec(url.searchParams.get('query') || '')?.[1].split(/,\s*/);
+    const author = url.searchParams.get('author');
+    return ok(workItems.filter((w) => (!ids || ids.includes(w.issue.idReadable)) && (!author || w.author.login === author)).slice(skip, skip + top));
+  }
+  // История по всему фильтру одним потоком (issueQuery тестовые данные не разбирают)
+  if (p === '/api/activities') return ok(activities.slice(skip, skip + top));
   const acts = /^\/api\/issues\/([^/]+)\/activities$/.exec(p);
   if (acts) return ok(activities.filter((a) => a.target.idReadable === decodeURIComponent(acts[1])).slice(skip, skip + top));
   const one = /^\/api\/issues\/([^/]+)$/.exec(p);

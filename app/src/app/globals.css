@@ -122,3 +122,9 @@
 .md .url { color: var(--muted-foreground); font-size: 11px; }
 .md hr { border: 0; border-top: 1px solid var(--border); }
 .md a { color: var(--primary); text-decoration: underline; }
+
+/* Загрузка поверх таблицы (TableLoader) */
+@keyframes td-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

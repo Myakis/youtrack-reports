@@ -9,12 +9,14 @@ import { cn } from '@/lib/utils';
 import { api, inExtension, PLATFORM, VERSION, YOUTRACK, YOUTRACK_MATCH } from '../shared';
 import { checkUpdate, isNewer, isStale, type UpdateState } from '../core/update';
 import {
-  attachBoards, badParts, boardIssueKeys, dropEach, findAssigneeAttr, isParseError, knownStates, listBoards, listProjects, listTags, listUsers, me,
+  attachBoards, attachSwimlanes, badParts, boardIssueKeys, br, dropEach, findAssigneeAttr, isParseError, knownStates, listBoards, listProjects, listTags, listUsers, me,
   queryParts, searchIssues, withoutPeriod, type Board, type Issue, type Project, type Signal, type User, type YtError,
 } from '../core/youtrack';
 import { findParticipation, issuesByKeys } from '../core/participation';
 import { fileName, toCSV, toJSON, toMarkdown, toTxt, type ExportMeta, type ExportOptions } from '../core/export';
 import { periodLabel, presetRange, type Preset } from '../core/period';
+import { computeStats, previousRange } from '../core/stats';
+import { attachTime } from '../core/time';
 import { uniqSorted } from '../core/suggest';
 import { store } from './lib/storage';
 import { copyText, download, getToken, hasYtPerm, num, openUrl, openYt, setToken, yt } from './lib/net';
@@ -22,6 +24,8 @@ import { boardLabel, boardOf, defaultForm, formQuery, loginOf, queryOptions, res
 import { Filters } from './components/Filters';
 import { IssueTable, type SortKey } from './components/IssueTable';
 import { IssueDetail } from './components/IssueDetail';
+import { ResultSummary, type CompareState } from './components/ResultSummary';
+import { TableLoader } from './components/TableLoader';
 import { AiPanel, type AiData } from './components/AiPanel';
 import { ExportDialog, type Format } from './components/ExportDialog';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -35,6 +39,13 @@ const MIME: Record<Format, string> = { txt: 'text/plain;charset=utf-8', md: 'tex
 const PART_NAMES = { project: 'Проект', assignee: 'Исполнитель', state: 'Статус', type: 'Тип', tag: 'Тег', period: 'Период', extra: 'Запрос' };
 const many = (n: number) => (n >= 100 ? '100+' : num(n));
 const C = ({ children }: { children: ReactNode }) => <code>{children}</code>;
+
+/**
+ * Фильтр для поиска по участию с доской: если проект не выбран — ещё проекты доски. Иначе в фильтре окажутся задачи
+ * всего YouTrack (например, все обновлённые за месяц), и список задач фильтра будет огромным.
+ */
+const withBoardProjects = (q: string, f: Form, board: Board | null, edited: boolean) =>
+  (board && board.projects.length && !f.project && !edited ? `project: ${board.projects.map(br).join(', ')} ${q}`.trim() : q);
 
 export function App() {
   // ---------- Настройки и списки ----------
@@ -65,6 +76,10 @@ export function App() {
   const [filter, setFilter] = useState('');
   const [tab, setTab] = useState<'detail' | 'ai'>('detail');
   const [aiRequest, setAiRequest] = useState<{ data: AiData; n: number } | null>(null);
+  const [compare, setCompare] = useState<CompareState>({ state: 'idle' });
+  /** Как искали последний раз — чтобы повторить поиск за прошлый период. */
+  const lastSearch = useRef<{ f: Form; attr: string; edited: boolean; who: string; byRole: boolean; board: Board | null; boardKeys: Set<string> | null } | null>(null);
+  const comparing = useRef<Signal | null>(null);
 
   // ---------- Состояние страницы ----------
   const [conn, setConn] = useState<{ state: 'ok' | 'err' | 'busy'; text: string }>({ state: 'busy', text: 'Подключение…' });
@@ -314,6 +329,9 @@ export function App() {
     if (running.current) running.current.cancelled = true;
     const signal: Signal = { cancelled: false };
     running.current = signal;
+    if (comparing.current) comparing.current.cancelled = true;
+    comparing.current = null;
+    setCompare({ state: 'idle' });
     setNotice(null);
     setSearching(true);
     setProgress({ text: 'Загрузка задач…', part: 0.05 });
@@ -334,7 +352,7 @@ export function App() {
         setStopShow(() => () => { stop.requested = true; setStopShow(null); prog('Останавливаюсь, собираю найденное…', 0.7); });
         let r;
         try {
-          r = await findParticipation(yt, q, who, { assigneeAttr: attr, wide: f.wide, signal, stop, onProgress: (t, part) => { if (!stop.requested) prog(t, part); } });
+          r = await findParticipation(yt, withBoardProjects(q, f, board, edited), who, { assigneeAttr: attr, wide: f.wide, signal, stop, only: boardKeys ?? undefined, onProgress: (t, part) => { if (!stop.requested) prog(t, part); } });
         } finally {
           setStopShow(null);
         }
@@ -360,9 +378,18 @@ export function App() {
       if (f.withBoards && found.length) {
         const from = byRole ? 0.82 : 0.4;
         prog('Определяю доски…', from);
-        await attachBoards(yt, found, { signal, onProgress: (d, t) => prog(`Доски: ${d} из ${t}`, from + (1 - from) * d / t) });
+        const onBoard = await attachBoards(yt, found, { signal, onProgress: (d, t) => prog(`Доски: ${d} из ${t}`, from + (1 - from) * d / t) });
+        if (f.withSwimlanes) {
+          prog('Определяю свимлейны…', 0.97);
+          await attachSwimlanes(yt, found, onBoard, { signal });
+        }
+      }
+      if (f.withTime && found.length) {
+        prog('Затраченное время…', 0.98);
+        await attachTime(yt, found, { author: who, signal, onProgress: (d, t) => prog(`Затраченное время: ${num(d)} из ${num(t)}`, 0.98) });
       }
       if (signal.cancelled) return;
+      lastSearch.current = { f, attr, edited, who, byRole, board, boardKeys };
       const dfLabel = { resolved: 'решения', updated: 'обновления', created: 'создания' }[f.dateField];
       setIssues(found);
       setTags((t) => uniqSorted([...t, ...found.flatMap((i) => i.tags)]));
@@ -411,7 +438,7 @@ export function App() {
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     let list = issues;
-    if (q) list = list.filter((i) => [i.key, i.summary, i.project, i.tags.join(' '), i.boards.join(' '), i.description].some((s) => s.toLowerCase().includes(q)));
+    if (q) list = list.filter((i) => [i.key, i.summary, i.project, i.tags.join(' '), i.boards.join(' '), i.swimlanes.join(' '), i.description].some((s) => s.toLowerCase().includes(q)));
     const val = (i: Issue): string | number => {
       switch (sortKey) {
         case 'key': return i.projectKey + String(Number(i.key.split('-')[1]) || 0).padStart(9, '0');
@@ -419,6 +446,8 @@ export function App() {
         case 'project': return i.project.toLowerCase();
         case 'state': return i.state.toLowerCase();
         case 'boards': return i.boards.join(' ').toLowerCase();
+        case 'swimlanes': return i.swimlanes.join(' ').toLowerCase();
+        case 'spent': return i.spent ?? -1;
         case 'comments': return i.comments.length;
         default: return i.resolved || i.updated;
       }
@@ -429,16 +458,64 @@ export function App() {
 
   const onSort = (k: SortKey) => {
     if (sortKey === k) setSortDir((d) => (d === 1 ? -1 : 1));
-    else { setSortKey(k); setSortDir(k === 'resolved' || k === 'comments' ? -1 : 1); }
+    else { setSortKey(k); setSortDir(k === 'resolved' || k === 'comments' || k === 'spent' ? -1 : 1); }
   };
   const select = (key: string) => { setSelected(key); setTab('detail'); };
   const openIssue = (i: Issue) => openUrl(i.url);
+
+  // ---------- Сводка и сравнение с прошлым периодом ----------
+  const stats = useMemo(() => computeStats(checked), [checked]);
+  const ls = lastSearch.current;
+  const prevRange = ls && !ls.edited ? previousRange(ls.f.preset, ls.f.from, ls.f.to) : null;
+  const compareReason = !ls ? '' : ls.edited ? 'Запрос изменён вручную — период в нём не поменять' : 'Сравнение — когда у периода есть начало и конец';
+
+  const runCompare = async () => {
+    const s = lastSearch.current;
+    const r = s && !s.edited ? previousRange(s.f.preset, s.f.from, s.f.to) : null;
+    if (!s || !r) return;
+    const signal: Signal = { cancelled: false };
+    comparing.current = signal;
+    const busy = (text: string) => { if (comparing.current === signal) setCompare({ state: 'busy', text }); };
+    busy(`Прошлый период (${periodLabel(r.from, r.to)})…`);
+    const pf: Form = { ...s.f, from: r.from, to: r.to, preset: 'custom' };
+    const q = formQuery(pf, latest.current.users, s.attr).trim();
+    try {
+      let list: Issue[];
+      if (s.byRole) {
+        const res = await findParticipation(yt, withBoardProjects(q, s.f, s.board, false), s.who, { assigneeAttr: s.attr, wide: s.f.wide, signal, only: s.boardKeys ?? undefined, onProgress: (t) => busy(t) });
+        list = await issuesByKeys(yt, YOUTRACK, [...res.roles.keys()], { signal });
+      } else if (s.boardKeys && !s.who) {
+        list = await issuesByKeys(yt, YOUTRACK, [...s.boardKeys], { signal, query: q });
+      } else {
+        list = await searchIssues(yt, YOUTRACK, q, { signal, onProgress: (n) => busy(`Прошлый период: ${num(n)} задач…`) });
+      }
+      if (s.boardKeys) list = list.filter((i) => s.boardKeys!.has(i.key));
+      if (s.f.withTime && list.length) {
+        busy('Прошлый период: время…');
+        await attachTime(yt, list, { author: s.who, signal });
+      }
+      if (comparing.current !== signal) return;
+      setCompare({ state: 'done', stats: computeStats(list), label: r.label, period: periodLabel(r.from, r.to) });
+    } catch (e) {
+      if (comparing.current !== signal || signal.cancelled) return;
+      setCompare({ state: 'idle' });
+      toast('Не удалось посчитать прошлый период: ' + (e as Error).message);
+    } finally {
+      if (comparing.current === signal) comparing.current = null;
+    }
+  };
+  const closeCompare = () => {
+    if (comparing.current) comparing.current.cancelled = true;
+    comparing.current = null;
+    setCompare({ state: 'idle' });
+  };
+  const compareMeta = compare.state === 'done' ? { stats: compare.stats, label: compare.label, period: compare.period } : null;
 
   // ---------- ИИ и выгрузка ----------
   const openAi = () => {
     if (!checked.length || !meta) return;
     const list = checked;
-    const m = { ...meta, generated: Date.now() };
+    const m = { ...meta, generated: Date.now(), compare: compareMeta };
     setAiRequest((r) => ({
       n: (r?.n ?? 0) + 1,
       data: {
@@ -453,7 +530,7 @@ export function App() {
   };
 
   const exportText = (fmt: Format, o: ExportOptions) => {
-    const m = { ...meta!, generated: Date.now() };
+    const m = { ...meta!, generated: Date.now(), compare: compareMeta };
     return fmt === 'md' ? toMarkdown(checked, m, o) : fmt === 'json' ? toJSON(checked, m, o) : fmt === 'txt' ? toTxt(checked) : toCSV(checked, o);
   };
   const openExport = () => { if (checked.length) setExportOpen(true); };
@@ -542,10 +619,10 @@ export function App() {
           <div className="flex flex-wrap items-center gap-2 border-b px-2.5 py-2">
             <span className="min-w-0 flex-1 truncate text-muted-foreground" title={summary}>{summary}</span>
             <Input className="h-8 w-48" placeholder="Фильтр по найденным…" autoComplete="off" spellCheck={false} value={filter} onChange={(e) => setFilter(e.target.value)} />
-            <Button variant="outline" size="sm" disabled={!checked.length} onClick={openAi} title="Открыть чат с моделью: отмеченные задачи и инструкция для отчёта уже подставлены">
+            <Button variant="outline" size="sm" disabled={!checked.length || searching} onClick={openAi} title="Открыть чат с моделью: отмеченные задачи и инструкция для отчёта уже подставлены">
               <SparklesIcon /> Для ИИ
             </Button>
-            <Button size="sm" disabled={!checked.length} onClick={openExport} title="Выгрузить отмеченные задачи (Ctrl+S)"><FileDownIcon /> Выгрузить…</Button>
+            <Button size="sm" disabled={!checked.length || searching} onClick={openExport} title="Выгрузить отмеченные задачи (Ctrl+S)"><FileDownIcon /> Выгрузить…</Button>
           </div>
           {progress && (
             <div className="relative flex items-center gap-2.5 border-b px-2.5 py-1.5 text-xs">
@@ -556,10 +633,18 @@ export function App() {
               <Button variant="outline" size="sm" className="h-7 text-xs" onClick={cancel} title="Прервать поиск">Отмена</Button>
             </div>
           )}
-          <IssueTable list={visible} excluded={excluded} selected={selected} sortKey={sortKey} sortDir={sortDir} withRoles={issues.some((i) => i.roles.length > 0)}
+          <div className="relative flex min-h-0 flex-1 flex-col" aria-busy={searching}>
+          {searching && <TableLoader text={progress?.text ?? ''} hasResults={issues.length > 0} />}
+          {meta && issues.length > 0 && (
+            <ResultSummary stats={stats} compare={compare} compareReason={compareReason}
+              compareLabel={prevRange ? `Сравнить с ${prevRange.label}` : null}
+              onCompare={runCompare} onCompareClose={closeCompare} />
+          )}
+          <IssueTable list={visible} excluded={excluded} selected={selected} sortKey={sortKey} sortDir={sortDir} withRoles={issues.some((i) => i.roles.length > 0)} withSwimlanes={issues.some((i) => i.swimlanes.length > 0)} withTime={issues.some((i) => i.spent != null)}
             empty={empty} onSort={onSort} onSelect={select} onOpen={openIssue}
             onToggle={(key, on) => setExcluded((s) => { const n = new Set(s); on ? n.delete(key) : n.add(key); return n; })}
             onToggleAll={(on) => setExcluded((s) => { const n = new Set(s); for (const i of visible) on ? n.delete(i.key) : n.add(i.key); return n; })} />
+          </div>
         </section>
 
         <aside className="flex min-w-80 flex-[0_0_40%] flex-col overflow-hidden rounded-lg border bg-card max-[900px]:min-h-[70vh] max-[900px]:min-w-0">

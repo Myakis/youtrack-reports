@@ -5,14 +5,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { fmtDate, type Issue } from '../../core/youtrack';
+import { fmtMinutes } from '../../core/time';
 import { ROLE_NAMES, type Role } from '../../core/participation';
 
-export type SortKey = 'key' | 'summary' | 'state' | 'project' | 'boards' | 'resolved' | 'comments';
+export type SortKey = 'key' | 'summary' | 'state' | 'project' | 'boards' | 'swimlanes' | 'spent' | 'resolved' | 'comments';
 
-export function Pill({ children, kind = 'tag', className }: { children: React.ReactNode; kind?: 'tag' | 'board' | 'role' | 'assignee'; className?: string }) {
+export function Pill({ children, kind = 'tag', className }: { children: React.ReactNode; kind?: 'tag' | 'board' | 'lane' | 'role' | 'assignee'; className?: string }) {
   return (
     <span className={cn('mr-1 mb-0.5 inline-block max-w-full truncate rounded px-1.5 align-top text-[11.5px] leading-5',
-      kind === 'tag' && 'bg-muted', kind === 'board' && 'bg-board-bg text-board', kind === 'role' && 'bg-selected', kind === 'assignee' && 'bg-ok-bg text-ok', className)}>
+      kind === 'tag' && 'bg-muted', kind === 'board' && 'bg-board-bg text-board', kind === 'lane' && 'border border-board/30 leading-[18px] text-board', kind === 'role' && 'bg-selected', kind === 'assignee' && 'bg-ok-bg text-ok', className)}>
       {children}
     </span>
   );
@@ -29,6 +30,8 @@ export interface IssueTableProps {
   sortKey: SortKey;
   sortDir: 1 | -1;
   withRoles: boolean;
+  withSwimlanes: boolean;
+  withTime: boolean;
   empty: string;
   onSort: (k: SortKey) => void;
   onToggle: (key: string, on: boolean) => void;
@@ -56,7 +59,7 @@ export function IssueTable(p: IssueTableProps) {
 
   return (
     <div className="relative min-h-0 flex-1 overflow-auto [&>[data-slot=table-container]]:overflow-visible">
-      <Table className={cn('table-fixed', p.withRoles ? 'min-w-[1130px]' : 'min-w-[980px]')}>
+      <Table className="table-fixed" style={{ minWidth: 980 + (p.withRoles ? 150 : 0) + (p.withSwimlanes ? 160 : 0) + (p.withTime ? 96 : 0) }}>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className="sticky top-0 z-10 h-8 w-9 bg-card">
@@ -68,8 +71,10 @@ export function IssueTable(p: IssueTableProps) {
             {head('state', 'Статус', 'w-30')}
             {head('project', 'Проект', 'w-30')}
             {head('boards', 'Доски', 'w-40')}
+            {p.withSwimlanes && head('swimlanes', 'Свимлейн', 'w-40')}
             {head(null, 'Теги', 'w-36')}
             {p.withRoles && head(null, 'Участие', 'w-38')}
+            {p.withTime && head('spent', 'Время', 'w-24 text-right', 'Списано по учёту времени')}
             {head('resolved', 'Решена', 'w-24')}
             {head('comments', <MessageSquareIcon className="size-3.5" />, 'w-12 text-right', 'Комментарии')}
           </TableRow>
@@ -89,8 +94,10 @@ export function IssueTable(p: IssueTableProps) {
                 <TableCell className="py-1.5" title={i.state}><Pill>{i.state}</Pill></TableCell>
                 <TableCell className="truncate py-1.5" title={i.project}>{i.project}</TableCell>
                 <TableCell className="truncate py-1.5" title={i.boards.join('\n')}>{i.boards.map((b) => <Pill key={b} kind="board">{b}</Pill>)}</TableCell>
+                {p.withSwimlanes && <TableCell className="truncate py-1.5" title={i.swimlanes.join('\n')}>{i.swimlanes.map((s) => <Pill key={s} kind="lane">{s}</Pill>)}</TableCell>}
                 <TableCell className="truncate py-1.5" title={i.tags.join(', ')}>{i.tags.map((t) => <Pill key={t}>{t}</Pill>)}</TableCell>
                 {p.withRoles && <TableCell className="truncate py-1.5"><RoleBadges roles={i.roles} /></TableCell>}
+                {p.withTime && <TableCell className="py-1.5 text-right whitespace-nowrap tabular-nums">{i.spent ? fmtMinutes(i.spent) : <span className="text-muted-foreground">—</span>}</TableCell>}
                 <TableCell className="py-1.5">{fmtDate(i.resolved, false)}</TableCell>
                 <TableCell className="py-1.5 text-right text-muted-foreground">{i.comments.length || ''}</TableCell>
               </TableRow>

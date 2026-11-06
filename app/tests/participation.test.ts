@@ -16,7 +16,16 @@ describe('поиск по участию (как в скрипте YoutrackRepor
       'CD-104': ['wasAssignee'],   // передала задачу Дмитрию
       'MOB-103': ['assignee'],
     });
-    expect(r).toMatchObject({ all: 6, checked: 6, stopped: false });
+    expect(r).toMatchObject({ all: 7, checked: 7, stopped: false });
+  });
+  it('с доской (only) — история только у задач доски, по одной, без потока по всему фильтру', async () => {
+    const paths: string[] = [];
+    const f: typeof mockFetch = (path, ...rest) => { paths.push(path); return mockFetch(path, ...rest); };
+    const r = await findParticipation(f, '', 'a.ivanova', { only: new Set(['CD-104', 'CD-106', 'NOPE-1']) });
+    expect(r).toMatchObject({ mode: 'perIssue', all: 2, checked: 2 });
+    expect(r.roles.get('CD-104')).toEqual(['wasAssignee']);
+    expect(paths.some((p) => p.startsWith('/api/activities'))).toBe(false);
+    expect([...new Set(paths.filter((p) => /\/activities/.test(p)).map((p) => /issues\/([^/]+)/.exec(p)![1]))].sort()).toEqual(['CD-104', 'CD-106']);
   });
 
   it('шире — ещё менял задачу и комментировал', async () => {
@@ -106,15 +115,6 @@ describe('поиск по участию (как в скрипте YoutrackRepor
     expect(r.roles.size).toBe(r.checked);
   });
 
-  it('задачи по ключам; если «issue id:» не понят — по одной', async () => {
-    const list = await issuesByKeys(mockFetch, BASE, ['CD-104', 'MOB-105']);
-    expect(list.map((i) => i.key).sort()).toEqual(['CD-104', 'MOB-105']);
-
-    const f: Fetcher = async (path) => path.startsWith('/api/issues?')
-      ? { status: 400, type: 'basic', text: '{"error":"Can\'t parse search query"}' }
-      : { status: 200, type: 'basic', text: JSON.stringify({ idReadable: decodeURIComponent(path.split('/')[3].split('?')[0]) }) };
-    expect((await issuesByKeys(f, BASE, ['A-1', 'B-2'])).map((i) => i.key)).toEqual(['A-1', 'B-2']);
-  });
   it('по умолчанию — история фильтра одним потоком (/api/activities?issueQuery=…)', async () => {
     const seen: string[] = [];
     const f: Fetcher = async (path) => {
@@ -187,6 +187,15 @@ describe('поиск по участию (как в скрипте YoutrackRepor
     expect(sorted(r.roles)).toEqual({ 'P-1': ['wasAssignee'] });
   });
 
+  it('задачи по ключам; если «issue id:» не понят — по одной', async () => {
+    const list = await issuesByKeys(mockFetch, BASE, ['CD-104', 'MOB-105']);
+    expect(list.map((i) => i.key).sort()).toEqual(['CD-104', 'MOB-105']);
+
+    const f: Fetcher = async (path) => path.startsWith('/api/issues?')
+      ? { status: 400, type: 'basic', text: '{"error":"Can\'t parse search query"}' }
+      : { status: 200, type: 'basic', text: JSON.stringify({ idReadable: decodeURIComponent(path.split('/')[3].split('?')[0]) }) };
+    expect((await issuesByKeys(f, BASE, ['A-1', 'B-2'])).map((i) => i.key)).toEqual(['A-1', 'B-2']);
+  });
 
   it('участие и TXT в выгрузке', async () => {
     const [i] = await issuesByKeys(mockFetch, BASE, ['CD-104']);

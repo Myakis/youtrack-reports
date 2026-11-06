@@ -1,6 +1,7 @@
 // Детали задачи: поля, описание и комментарии.
 import { ExternalLinkIcon } from 'lucide-react';
 import { fmtDate, type Issue } from '../../core/youtrack';
+import { fmtMinutes } from '../../core/time';
 import { Pill, RoleBadges } from './IssueTable';
 
 const H = ({ children }: { children: React.ReactNode }) => (
@@ -14,9 +15,11 @@ export function IssueDetail({ issue: i }: { issue: Issue | null }) {
     ...(i.roles.length ? [['Участие', <RoleBadges roles={i.roles} />] as [string, React.ReactNode]] : []),
     ['Проект', i.project],
     ['Доски', i.boards.length ? i.boards.map((b) => <Pill key={b} kind="board">{b}</Pill>) : <None />],
+    ...(i.swimlanes.length ? [['Свимлейн', i.swimlanes.map((s) => <Pill key={s} kind="lane">{s}</Pill>)] as [string, React.ReactNode]] : []),
     ['Теги', i.tags.length ? i.tags.map((t) => <Pill key={t}>{t}</Pill>) : <None />],
     ['Создана', fmtDate(i.created)],
     ['Решена', fmtDate(i.resolved)],
+    ...(i.spent != null ? [['Списано', i.spent ? fmtMinutes(i.spent) : <None />] as [string, React.ReactNode]] : []),
     ['Автор', i.reporter],
     ...Object.entries(i.fields).filter(([, v]) => v),
     ...(i.links.length ? [['Связи', i.links.map((l) => `${l.type} ${l.keys.join(', ')}`).join('; ')] as [string, React.ReactNode]] : []),

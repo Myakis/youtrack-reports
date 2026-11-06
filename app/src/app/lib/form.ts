@@ -17,6 +17,10 @@ export interface Form {
   to: string;
   dateField: DateField;
   withBoards: boolean;
+  /** Ещё свимлейны досок (нужны доски). */
+  withSwimlanes: boolean;
+  /** Ещё затраченное время по учёту времени. */
+  withTime: boolean;
   wide: boolean;
 }
 
@@ -24,7 +28,7 @@ export function defaultForm(): Form {
   const r = presetRange('month');
   return {
     mode: 'assignee', assignee: '', states: 'Готово', project: '', board: '', sprint: '', types: '', tags: '',
-    preset: 'month', from: r.from, to: r.to, dateField: 'resolved', withBoards: true, wide: false,
+    preset: 'month', from: r.from, to: r.to, dateField: 'resolved', withBoards: true, withSwimlanes: false, withTime: true, wide: false,
   };
 }
 
@@ -33,6 +37,8 @@ export function restoreForm(saved: any): Form {
   const f = { ...defaultForm(), ...(saved || {}) } as Form;
   f.mode = f.mode === 'participant' ? 'participant' : 'assignee';
   f.withBoards = saved?.withBoards !== false;
+  f.withSwimlanes = !!f.withSwimlanes;
+  f.withTime = saved?.withTime !== false;
   f.wide = !!f.wide;
   if (f.preset !== 'custom') Object.assign(f, presetRange((f.preset || 'month') as Preset));
   return f;
