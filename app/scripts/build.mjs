@@ -1,4 +1,4 @@
-// Сборка TrackDesk: dist/firefox, dist/chromium и пакеты в release/.
+// Сборка YouTrack Reports: dist/firefox, dist/chromium и пакеты в release/.
 import { build } from 'esbuild';
 import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { deflateRawSync, crc32 } from 'node:zlib';
@@ -42,11 +42,11 @@ const YOUTRACK = 'https://youtrack.office.lan';
 
 const base = {
   manifest_version: 3,
-  name: 'TrackDesk',
+  name: 'YouTrack Reports',
   version,
   description: 'Задачи YouTrack по исполнителю: выполненные задачи, доски, комментарии и выгрузка для отчёта.',
   icons: { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 96: 'icons/icon96.png', 128: 'icons/icon128.png' },
-  action: { default_title: 'Открыть TrackDesk', default_icon: { 16: 'icons/icon16.png', 32: 'icons/icon32.png' } },
+  action: { default_title: 'Открыть YouTrack Reports', default_icon: { 16: 'icons/icon16.png', 32: 'icons/icon32.png' } },
   permissions: ['storage', 'tabs', 'cookies', 'alarms'],
   // chat.office.lan — ИИ-чат (вход по cookie token, как в LogDesk)
   host_permissions: [YOUTRACK + '/*', 'https://chat.office.lan/*'],
@@ -80,9 +80,9 @@ for (const [name, manifest] of Object.entries(targets)) {
   execFileSync(join('node_modules', '.bin', 'tailwindcss'), ['-i', 'src/app/globals.css', '-o', join(out, 'app.css'), '--minify'], { stdio: ['ignore', 'ignore', 'inherit'] });
   cpSync('src/icons', join(out, 'icons'), { recursive: true });
   writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
-  const file = name === 'firefox' ? `TrackDesk-${version}-firefox.xpi` : `TrackDesk-${version}-chromium.zip`;
+  const file = name === 'firefox' ? `YouTrackReports-${version}-firefox.xpi` : `YouTrackReports-${version}-chromium.zip`;
   rmSync(join('release', file), { force: true });
   zipDir(out, join('release', file));
-  cpSync(join('release', file), join('latest', name === 'firefox' ? 'TrackDesk-firefox.xpi' : 'TrackDesk-chromium.zip'));
+  cpSync(join('release', file), join('latest', name === 'firefox' ? 'YouTrackReports-firefox.xpi' : 'YouTrackReports-chromium.zip'));
   console.log('✓', name, '→ release/' + file);
 }

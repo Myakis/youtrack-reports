@@ -1,4 +1,4 @@
-// Точка входа страницы TrackDesk.
+// Точка входа страницы YouTrack Reports.
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Toaster } from '@/components/ui/sonner';

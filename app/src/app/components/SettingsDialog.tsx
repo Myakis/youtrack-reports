@@ -63,7 +63,7 @@ export function SettingsDialog(p: SettingsDialogProps) {
               </> : <>
                 <li>«Скачать» — загрузится архив <code>.zip</code>.</li>
                 <li>Распакуйте его <b>в ту же папку</b>, откуда установлено расширение, с заменой файлов.</li>
-                <li>«Перезапустить расширение» — TrackDesk перечитает файлы и откроется заново. Токен и настройки сохранятся.</li>
+                <li>«Перезапустить расширение» — YouTrack Reports перечитает файлы и откроется заново. Токен и настройки сохранятся.</li>
               </>}
             </ol>
           </>
@@ -79,7 +79,7 @@ export function SettingsDialog(p: SettingsDialogProps) {
         <Separator className="my-1" />
 
         <DialogHeader><DialogTitle>Вход в YouTrack</DialogTitle></DialogHeader>
-        <p>TrackDesk сначала пробует вашу сессию браузера: если вы вошли в <b>youtrack.office.lan</b>, ничего настраивать не нужно.</p>
+        <p>YouTrack Reports сначала пробует вашу сессию браузера: если вы вошли в <b>youtrack.office.lan</b>, ничего настраивать не нужно.</p>
         <p>Если YouTrack не пускает — создайте постоянный токен: YouTrack → ваш профиль → <b>Безопасность аккаунта</b> →{' '}
           <b>Новый токен</b> (область — YouTrack), и вставьте его сюда. Токен хранится только в этом браузере.</p>
         <Label className="flex flex-col items-stretch gap-1.5 font-normal">

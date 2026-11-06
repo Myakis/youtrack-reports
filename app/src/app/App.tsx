@@ -1,4 +1,4 @@
-// Страница TrackDesk: выбор исполнителя, поиск задач, детали, выгрузка и ИИ-чат.
+// Страница YouTrack Reports: выбор исполнителя, поиск задач, детали, выгрузка и ИИ-чат.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { ExternalLinkIcon, FileDownIcon, ListIcon, MoonIcon, SettingsIcon, SparklesIcon, SunIcon, SunMoonIcon, XIcon } from 'lucide-react';
@@ -153,7 +153,7 @@ export function App() {
             if (await api.permissions.request({ origins: [YOUTRACK_MATCH] }).catch(() => false)) return connectNow();
             setNotice({
               kind: 'warn',
-              body: <p><b>Доступ не выдан.</b> Если запрос не появился — Chrome: <C>chrome://extensions</C> → TrackDesk → «Подробнее» → «Доступ к сайтам» → добавьте https://youtrack.office.lan (или «На всех сайтах»); если TrackDesk обновляли — нажмите там ⟳. Firefox: <C>about:addons</C> → TrackDesk → «Разрешения». TrackDesk продолжит сам.</p>,
+              body: <p><b>Доступ не выдан.</b> Если запрос не появился — Chrome: <C>chrome://extensions</C> → YouTrack Reports → «Подробнее» → «Доступ к сайтам» → добавьте https://youtrack.office.lan (или «На всех сайтах»); если YouTrack Reports обновляли — нажмите там ⟳. Firefox: <C>about:addons</C> → YouTrack Reports → «Разрешения». YouTrack Reports продолжит сам.</p>,
               buttons: [{ label: 'Повторить', run: connectNow }],
             });
           },
@@ -488,7 +488,7 @@ export function App() {
     <div className="flex h-full flex-col gap-2.5 overflow-hidden p-2.5 max-[900px]:overflow-auto">
       <header className="flex flex-wrap items-center gap-2.5">
         <div className="flex items-center gap-2 text-[15px] font-bold">
-          <img src="icons/icon32.png" alt="" width={20} height={20} /> TrackDesk
+          <img src="icons/icon32.png" alt="" width={20} height={20} /> YouTrack Reports
           <span className="text-xs font-normal text-muted-foreground">{inExtension ? 'v' + VERSION : 'тестовые данные'}</span>
           {fresh && update?.latest && (
             <button className="rounded-full border border-primary/35 bg-selected px-2 text-[11px] font-semibold text-primary hover:bg-primary hover:text-primary-foreground"

@@ -32,7 +32,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: trackdesk-${{ github.sha }}
+          name: youtrack-reports-${{ github.sha }}
           path: |
             app/release/*.zip
             app/release/*.xpi

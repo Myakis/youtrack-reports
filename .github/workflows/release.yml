@@ -62,8 +62,8 @@ jobs:
           TAG: ${{ steps.v.outputs.tag }}
         run: |
           gh release create "$TAG" \
-            "release/TrackDesk-$VERSION-chromium.zip" \
-            "release/TrackDesk-$VERSION-firefox.xpi" \
-            --title "TrackDesk $VERSION" \
+            "release/YouTrackReports-$VERSION-chromium.zip" \
+            "release/YouTrackReports-$VERSION-firefox.xpi" \
+            --title "YouTrack Reports $VERSION" \
             --notes-file notes.md \
             --target "$GITHUB_SHA"

@@ -53,7 +53,7 @@ export function queryOptions(f: Form, users: User[], assigneeAttr: string): Quer
   };
 }
 
-/** В режиме «участник» в запросе — только фильтр задач: условие на сотрудника TrackDesk проверяет сам. */
+/** В режиме «участник» в запросе — только фильтр задач: условие на сотрудника YouTrack Reports проверяет сам. */
 export const formQuery = (f: Form, users: User[], attr: string) =>
   (f.mode === 'participant' ? baseQuery(queryOptions(f, users, attr)) : buildQuery(queryOptions(f, users, attr)));
 

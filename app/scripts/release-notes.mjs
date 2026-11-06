@@ -24,8 +24,8 @@ console.log(`${body}
 
 **Установка**
 
-- **Chrome / Edge / Яндекс Браузер:** распакуйте \`TrackDesk-${version}-chromium.zip\` в постоянную папку →
+- **Chrome / Edge / Яндекс Браузер:** распакуйте \`YouTrackReports-${version}-chromium.zip\` в постоянную папку →
   \`chrome://extensions\` → «Режим разработчика» → «Загрузить распакованное расширение». При обновлении — распакуйте
-  поверх той же папки и нажмите ⟳ у TrackDesk.
+  поверх той же папки и нажмите ⟳ у YouTrack Reports.
 - **Firefox Developer Edition:** \`about:config\` → \`xpinstall.signatures.required\` = \`false\`, затем перетащите
-  \`TrackDesk-${version}-firefox.xpi\` в окно браузера.`);
+  \`YouTrackReports-${version}-firefox.xpi\` в окно браузера.`);

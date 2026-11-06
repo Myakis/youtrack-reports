@@ -1,4 +1,4 @@
-// Фон: открывает TrackDesk по значку и вкладку YouTrack для входа, когда сессия истекла;
+// Фон: открывает YouTrack Reports по значку и вкладку YouTrack для входа, когда сессия истекла;
 // раз в несколько часов проверяет новую версию на GitHub и ставит отметку на значок.
 import { api, PLATFORM, VERSION, YOUTRACK, YOUTRACK_MATCH } from './shared';
 import { checkUpdate, CHECK_EVERY_MS, isNewer, isStale, type UpdateState } from './core/update';
@@ -25,9 +25,9 @@ async function showBadge(state: UpdateState | null) {
   await api.action.setBadgeText({ text: fresh ? '↑' : '' });
   if (fresh) {
     await api.action.setBadgeBackgroundColor({ color: '#7c3aed' });
-    await api.action.setTitle({ title: `Открыть TrackDesk — доступна версия ${v}` });
+    await api.action.setTitle({ title: `Открыть YouTrack Reports — доступна версия ${v}` });
   } else {
-    await api.action.setTitle({ title: 'Открыть TrackDesk' });
+    await api.action.setTitle({ title: 'Открыть YouTrack Reports' });
   }
 }
 
@@ -43,7 +43,7 @@ api.alarms.create('checkUpdate', { periodInMinutes: CHECK_EVERY_MS / 60000, dela
 api.alarms.onAlarm.addListener((a: any) => { if (a.name === 'checkUpdate') checkForUpdate(); });
 api.runtime.onStartup.addListener(() => checkForUpdate());
 api.runtime.onInstalled.addListener(async () => {
-  // После «Перезапустить» в настройках — вернуть вкладку TrackDesk, которую закрыл перезапуск.
+  // После «Перезапустить» в настройках — вернуть вкладку YouTrack Reports, которую закрыл перезапуск.
   const { reopenAfterUpdate } = await api.storage.local.get('reopenAfterUpdate');
   if (reopenAfterUpdate) {
     await api.storage.local.remove('reopenAfterUpdate');

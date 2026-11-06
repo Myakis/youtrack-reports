@@ -1,5 +1,5 @@
-// ИИ-чат в TrackDesk: разбор найденных задач корпоративной нейросетью chat.office.lan (Open WebUI), как в LogDesk.
-// Вход — по cookie «token» вашей сессии в chat.office.lan; разговор идёт внутри TrackDesk.
+// ИИ-чат в YouTrack Reports: разбор найденных задач корпоративной нейросетью chat.office.lan (Open WebUI), как в LogDesk.
+// Вход — по cookie «token» вашей сессии в chat.office.lan; разговор идёт внутри YouTrack Reports.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { CopyIcon, RotateCcwIcon, SendIcon, SquareIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -144,7 +144,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
             const ok = await api.permissions.request({ origins: [CHAT_MATCH] }).catch(() => false);
             if (ok) { setNotice(null); retry(); return; }
             setNotice({
-              body: <p><b>Доступ не выдан.</b> Если запрос не появился — Chrome: <code>chrome://extensions</code> → TrackDesk → «Подробнее» → «Доступ к сайтам» → добавьте https://chat.office.lan; Firefox: <code>about:addons</code> → TrackDesk → «Разрешения». TrackDesk продолжит сам.</p>,
+              body: <p><b>Доступ не выдан.</b> Если запрос не появился — Chrome: <code>chrome://extensions</code> → YouTrack Reports → «Подробнее» → «Доступ к сайтам» → добавьте https://chat.office.lan; Firefox: <code>about:addons</code> → YouTrack Reports → «Разрешения». YouTrack Reports продолжит сам.</p>,
               buttons: [{ label: 'Повторить', run: () => { setNotice(null); retry(); } }],
             });
           },
