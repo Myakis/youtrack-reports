@@ -3,6 +3,7 @@ import { ExternalLinkIcon } from 'lucide-react';
 import { fmtDate, type Issue } from '../../core/youtrack';
 import { fmtMinutes } from '../../core/time';
 import { Pill, RoleBadges } from './IssueTable';
+import { FlowSteps } from './FlowBar';
 
 const H = ({ children }: { children: React.ReactNode }) => (
   <h3 className="mt-4 mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{children}</h3>
@@ -30,12 +31,13 @@ export function IssueDetail({ issue: i }: { issue: Issue | null }) {
         {i.key} <ExternalLinkIcon className="size-3" />
       </a>
       <h2 className="mt-0.5 text-base leading-snug font-semibold">{i.summary}</h2>
-      <dl className="my-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[12.5px]">
+      <dl className="my-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[0.7812rem]">
         {rows.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted-foreground">{k}</dt><dd className="break-words">{v}</dd></div>)}
       </dl>
+      {i.flow && <><H>Путь по статусам</H><FlowSteps flow={i.flow} resolved={!!i.resolved} /></>}
       <H>Описание</H>
       {i.description.trim()
-        ? <div className="rounded-md bg-muted px-3 py-2.5 text-[12.5px] break-words whitespace-pre-wrap">{i.description}</div>
+        ? <div className="rounded-md bg-muted px-3 py-2.5 text-[0.7812rem] break-words whitespace-pre-wrap">{i.description}</div>
         : <p className="text-muted-foreground">Нет описания</p>}
       <H>Комментарии ({i.comments.length})</H>
       {i.comments.length ? i.comments.map((c, k) => (

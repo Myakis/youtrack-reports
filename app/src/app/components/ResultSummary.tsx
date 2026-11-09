@@ -1,22 +1,55 @@
 // Сводка над таблицей: задачи, время, медиана решения, разбивка по типам, проектам и приоритетам;
-// кнопка «Сравнить с прошлым периодом» — те же цифры за прошлый период и разница.
-import { GitCompareArrowsIcon, Loader2Icon, XIcon } from 'lucide-react';
+// «Сравнить…» — с прошлым или другим периодом либо с другим сотрудником: разница у цифр и таблица рядом.
+import { ChartColumnIcon, Loader2Icon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { diff, fmtDays, fmtHours, type Stats } from '../../core/stats';
+import { fmtDuration, type FlowStats } from '../../core/flow';
+import { stateColor } from './FlowBar';
+import { SummaryCharts } from './SummaryCharts';
+import type { Issue } from '../../core/youtrack';
+import type { PickItem } from '../../core/suggest';
+import { CompareMenu, type CompareTarget } from './CompareMenu';
+import { CompareTable } from './CompareTable';
+
+/** С чем сравнили: цифры, задачи (для графиков) и как это называть. */
+export interface CompareResult {
+  stats: Stats;
+  flows: FlowStats | null;
+  issues: Issue[];
+  /** Для «по сравнению с …»: «прошлым месяцем», «сотрудником Дмитрий Смирнов». */
+  label: string;
+  /** Период сравнения строкой. */
+  period: string;
+  range: { from: string; to: string };
+  /** Подписи колонок: текущий поиск и сравнение. */
+  aName: string;
+  bName: string;
+}
 
 export type CompareState =
   | { state: 'idle' }
   | { state: 'busy'; text: string }
-  | { state: 'done'; stats: Stats; label: string; period: string };
+  | ({ state: 'done' } & CompareResult);
 
 export interface ResultSummaryProps {
   stats: Stats;
+  /** Задачи, по которым сводка (отмеченные), и период поиска — для графиков. */
+  issues: Issue[];
+  period: { from: string; to: string };
+  charts: boolean;
+  onCharts: (on: boolean) => void;
+  /** Путь по статусам; null — не загружали. */
+  flows: FlowStats | null;
   compare: CompareState;
-  /** «Сравнить с прошлым месяцем»; null — сравнить нельзя, reason — почему. */
-  compareLabel: string | null;
+  /** «прошлым месяцем»; null — у периода нет начала или конца. */
+  prevLabel: string | null;
+  canPeriod: boolean;
+  canPerson: boolean;
   compareReason: string;
-  onCompare: () => void;
+  login: string;
+  users: PickItem[];
+  onCompare: (t: CompareTarget) => void;
   onCompareClose: () => void;
 }
 
@@ -24,7 +57,7 @@ export interface ResultSummaryProps {
 function Delta({ cur, prev, fmt, title }: { cur: number; prev: number; fmt?: (n: number) => string; title: string }) {
   const d = cur - prev;
   return (
-    <span title={title} className={cn('ml-1 text-[11px] font-medium tabular-nums', d > 0 ? 'text-ok' : 'text-muted-foreground')}>
+    <span title={title} className={cn('ml-1 text-[0.6875rem] font-medium tabular-nums', d > 0 ? 'text-ok' : 'text-muted-foreground')}>
       {diff(cur, prev, fmt)}
     </span>
   );
@@ -57,7 +90,8 @@ function Breakdown({ label, items, n = 4 }: { label: string; items: [string, num
   );
 }
 
-export function ResultSummary({ stats: s, compare: c, compareLabel, compareReason, onCompare, onCompareClose }: ResultSummaryProps) {
+export function ResultSummary(p: ResultSummaryProps) {
+  const { stats: s, issues, period, charts, onCharts, flows, compare: c, onCompareClose } = p;
   const prev = c.state === 'done' ? c : null;
   const vs = prev ? `По сравнению с ${prev.label} (${prev.period})` : '';
   return (
@@ -74,13 +108,17 @@ export function ResultSummary({ stats: s, compare: c, compareLabel, compareReaso
         {s.leadDays != null && (
           <Metric label="Решение (медиана)" value={`${fmtDays(s.leadDays)} дн.`}>
             {prev?.stats.leadDays != null && (
-              <span className="ml-1 text-[11px] text-muted-foreground tabular-nums" title={`${vs}: было ${fmtDays(prev.stats.leadDays)} дн.`}>
+              <span className="ml-1 text-[0.6875rem] text-muted-foreground tabular-nums" title={`${vs}: было ${fmtDays(prev.stats.leadDays)} дн.`}>
                 было {fmtDays(prev.stats.leadDays)}
               </span>
             )}
           </Metric>
         )}
         <div className="ml-auto flex items-center gap-1">
+          <Button variant={charts ? 'secondary' : 'ghost'} size="sm" className="h-7 text-xs" aria-pressed={charts} onClick={() => onCharts(!charts)}
+            title={charts ? 'Скрыть графики' : 'Графики: решено по неделям, типы, время по проектам, время в статусах'}>
+            <ChartColumnIcon /> Графики
+          </Button>
           {c.state === 'busy' && <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2Icon className="size-3.5 animate-spin" />{c.text}</span>}
           {prev && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -89,10 +127,8 @@ export function ResultSummary({ stats: s, compare: c, compareLabel, compareReaso
             </span>
           )}
           {c.state === 'idle' && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={!compareLabel} onClick={onCompare}
-              title={compareLabel ? 'Тот же поиск за прошлый период — и разница в цифрах' : compareReason}>
-              <GitCompareArrowsIcon /> {compareLabel || 'Сравнить с прошлым периодом'}
-            </Button>
+            <CompareMenu prevLabel={p.prevLabel} canPeriod={p.canPeriod} canPerson={p.canPerson} reason={p.compareReason}
+              login={p.login} users={p.users} onCompare={p.onCompare} />
           )}
         </div>
       </div>
@@ -100,7 +136,22 @@ export function ResultSummary({ stats: s, compare: c, compareLabel, compareReaso
         <Breakdown label="Типы" items={s.byType} />
         {s.byProject.length > 1 && <Breakdown label="Проекты" items={s.byProject} n={3} />}
         <Breakdown label="Приоритеты" items={s.byPriority} />
+        {s.byAssignee.length > 1 && <Breakdown label="Исполнители" items={s.byAssignee} n={4} />}
       </div>
+      {flows && flows.states.length > 0 && (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs"
+          title={'Сколько задача обычно проводит в статусе (медиана по задачам, где он был; все заходы вместе).\nФинальный статус решённой задачи не считается.'}>
+          <span className="text-muted-foreground">В статусах (медиана):</span>
+          {flows.states.map((x) => (
+            <span key={x.state} className="inline-flex items-center gap-1 whitespace-nowrap" title={`${x.state}: медиана ${fmtDuration(x.median)}, задач ${x.count}`}>
+              <span className={cn('size-2 rounded-full', stateColor(x.state))} />{x.state} <b className="font-semibold tabular-nums">{fmtDuration(x.median)}</b>
+            </span>
+          ))}
+          {flows.withReturns > 0 && <span className="whitespace-nowrap text-warn">↺ с возвратами: {flows.withReturns} из {flows.total}</span>}
+        </div>
+      )}
+      {prev && <CompareTable a={s} b={prev.stats} aName={prev.aName} bName={prev.bName} aFlows={flows} bFlows={prev.flows} />}
+      {charts && <SummaryCharts issues={issues} stats={s} flows={flows} from={period.from} to={period.to} compare={prev} />}
     </div>
   );
 }

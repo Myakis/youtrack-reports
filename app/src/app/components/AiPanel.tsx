@@ -1,7 +1,7 @@
 // ИИ-чат в YouTrack Reports: разбор найденных задач корпоративной нейросетью chat.office.lan (Open WebUI), как в LogDesk.
 // Вход — по cookie «token» вашей сессии в chat.office.lan; разговор идёт внутри YouTrack Reports.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronRightIcon, CopyIcon, PinIcon, RotateCcwIcon, SendIcon, SettingsIcon, SquareIcon } from 'lucide-react';
+import { ChevronRightIcon, CopyIcon, HistoryIcon, PinIcon, RotateCcwIcon, SendIcon, SettingsIcon, SquareIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -11,8 +11,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSepa
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { api, inExtension } from '../../shared';
-import { defaultTemplate, GOAL_ABOUT, GOAL_GROUPS, GOAL_NAMES, GOALS, goalPrompt, isGoal, PROMPT_VARS, type AiGoal, type Goal } from '../../core/prompts';
+import { defaultTemplate, GOAL_ABOUT, GOAL_GROUPS, GOAL_NAMES, GOALS, goalPrompt, isGoal, LEAD_GOALS, PROMPT_VARS, type AiGoal, type Goal } from '../../core/prompts';
 import { md, stripReasoning } from '../md';
+import { saveChat, type ChatTurn } from '../lib/aiHistory';
+import { AiHistoryDialog } from './AiHistoryDialog';
 import { store } from '../lib/storage';
 import { copyText, num, openUrl } from '../lib/net';
 
@@ -102,9 +104,13 @@ export interface AiPanelProps {
   request: { data: AiData; n: number } | null;
   /** Вкладка видна — подгрузить модели. */
   shown: boolean;
+  /** Режим руководителя (код «lead»): открыты цели руководителя; null — ещё не прочитан из настроек. */
+  leadMode: boolean | null;
+  /** Выбрать цель снаружи (например, «Попробовать» после кода): n меняется при каждом запросе. */
+  goalRequest?: { goal: AiGoal; n: number } | null;
 }
 
-export function AiPanel({ request, shown }: AiPanelProps) {
+export function AiPanel({ request, shown, leadMode, goalRequest }: AiPanelProps) {
   const data = request?.data ?? null;
   const [models, setModels] = useState<Model[]>([]);
   const [model, setModel] = useState('');
@@ -119,6 +125,11 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   const [input, setInput] = useState('');
   const [inputEdited, setInputEdited] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
+  // История: id текущего разговора (новый — после «Новый разговор») и его вопросы-ответы
+  const chatId = useRef('');
+  const chatLog = useRef<ChatTurn[]>([]);
+  const chatCreated = useRef(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const messages = useRef<Msg[]>([]);
   const [busy, setBusy] = useState(false);
   const abortCtl = useRef<AbortController | null>(null);
@@ -221,6 +232,8 @@ export function AiPanel({ request, shown }: AiPanelProps) {
   const reset = useCallback((g: AiGoal, p: Promo) => {
     abortCtl.current?.abort();
     messages.current = [];
+    chatId.current = '';
+    chatLog.current = [];
     setTurns([]);
     setNotice(null);
     setInput(promptFor(g, p));
@@ -266,6 +279,16 @@ export function AiPanel({ request, shown }: AiPanelProps) {
     store.set('aiGoal', g);
     regenerate(g, promo);
   };
+
+  // Без режима руководителя его целей (повышение, 1:1) нет: группу не показываем, выбранную цель — на «Отчёт»
+  const goalGroups = GOAL_GROUPS.filter((g) => leadMode || !g.lead);
+  useEffect(() => { if (leadMode === false && LEAD_GOALS.includes(goal)) setGoal('report'); }, [leadMode, goal]);
+  // Цель снаружи — сразу с открытыми настройками: у повышения там грейды и описание
+  useEffect(() => {
+    if (!goalRequest || (!leadMode && LEAD_GOALS.includes(goalRequest.goal))) return;
+    setGoal(goalRequest.goal);
+    setSettingsOpen(true);
+  }, [goalRequest?.n]);
 
   const changePromo = (patch: Partial<Promo>) => {
     const p = { ...promo, ...patch };
@@ -339,10 +362,16 @@ export function AiPanel({ request, shown }: AiPanelProps) {
       if (first) messages.current.push(outgoing[0]);
       messages.current.push(userMsg, { role: 'assistant', content: shownText });
       const name = models.find((m) => m.id === model)?.name || model;
-      setAnswer({
-        text: shownText, state: 'done',
-        meta: `${name} · ${Math.round((Date.now() - started) / 1000)} с` +
-          (usage?.prompt_tokens ? ` · токенов: вход ${num(usage.prompt_tokens)}, ответ ${num(usage.completion_tokens || 0)}` : ''),
+      const meta = `${name} · ${Math.round((Date.now() - started) / 1000)} с` +
+        (usage?.prompt_tokens ? ` · токенов: вход ${num(usage.prompt_tokens)}, ответ ${num(usage.completion_tokens || 0)}` : '');
+      setAnswer({ text: shownText, state: 'done', meta });
+      // В историю — вопрос и ответ (данные задач не сохраняем: они большие и есть в YouTrack)
+      if (!chatId.current) { chatId.current = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); chatCreated.current = Date.now(); }
+      chatLog.current = [...chatLog.current, { kind: 'q', text }, { kind: 'a', text: shownText, meta: `${name} · ${new Date().toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}` }];
+      saveChat({
+        id: chatId.current, created: chatCreated.current, updated: Date.now(),
+        title: `${goal === 'none' ? 'Свой вопрос' : GOAL_NAMES[goal]} · ${data.label}`, goal,
+        context: data.label, count: data.count, turns: chatLog.current,
       });
       scrollToEnd();
     } catch (e) {
@@ -360,7 +389,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
       setBusy(false);
       abortCtl.current = null;
     }
-  }, [input, busy, data, model, models, opts, loadModels, handleAccess]);
+  }, [input, busy, data, model, models, opts, goal, loadModels, handleAccess]);
 
   const copyData = async () => {
     if (!data) return;
@@ -402,7 +431,11 @@ export function AiPanel({ request, shown }: AiPanelProps) {
         <Button variant="outline" size="sm" className="h-8" onClick={() => reset(goal, promo)} title="Начать разговор заново с теми же задачами">
           <RotateCcwIcon /> Новый разговор
         </Button>
+        <Button variant="outline" size="icon" className="size-8" onClick={() => setHistoryOpen(true)} title="История разговоров: найти и перечитать прошлые ответы">
+          <HistoryIcon />
+        </Button>
       </div>
+      <AiHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} />
 
       <div className={cn('rounded-md bg-muted px-2.5 py-1.5 text-xs', over && 'ring-1 ring-destructive/40')}>{ctx}</div>
 
@@ -438,16 +471,16 @@ export function AiPanel({ request, shown }: AiPanelProps) {
             <Select value={goal} disabled={locked} onValueChange={(v) => setGoal(v as AiGoal)}>
               <SelectTrigger size="sm" className="h-7 w-56 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent className="max-h-[60vh]">
-                {GOAL_GROUPS.map((g, i) => (
+                {goalGroups.map((g, i) => (
                   <SelectGroup key={g.label || 'none'}>
                     {i > 0 && <SelectSeparator />}
-                    {g.label && <SelectLabel className="text-[11px]">{g.label}</SelectLabel>}
+                    {g.label && <SelectLabel className="text-[0.6875rem]">{g.label}</SelectLabel>}
                     {g.goals.map((x) => <SelectItem key={x.v} value={x.v} className="text-xs" title={x.hint}>{x.name}</SelectItem>)}
                   </SelectGroup>
                 ))}
               </SelectContent>
             </Select>
-            <span className="min-w-0 flex-1 basis-48 text-[11px] text-muted-foreground">{GOALS.find((g) => g.v === goal)?.hint}</span>
+            <span className="min-w-0 flex-1 basis-48 text-[0.6875rem] text-muted-foreground">{GOALS.find((g) => g.v === goal)?.hint}</span>
           </div>
 
           {goal === 'none' ? (
@@ -456,12 +489,12 @@ export function AiPanel({ request, shown }: AiPanelProps) {
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-muted-foreground">Промпт цели «{GOAL_NAMES[goal]}»</span>
-                <span className={cn('rounded px-1.5 text-[11px]', custom[goal] ? 'bg-selected text-primary' : 'bg-muted text-muted-foreground')}>
+                <span className={cn('rounded px-1.5 text-[0.6875rem]', custom[goal] ? 'bg-selected text-primary' : 'bg-muted text-muted-foreground')}>
                   {custom[goal] ? 'свой' : 'стандартный'}
                 </span>
               </div>
               <Textarea rows={6} spellCheck={false} className="max-h-[40vh] min-h-24 text-xs leading-relaxed" value={draft} onChange={(e) => setDraft(e.target.value)} />
-              <p className="text-[11px] text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono">
+              <p className="text-[0.6875rem] text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono">
                 Подстановки: {PROMPT_VARS.map((v, i) => <span key={v}>{i ? ' ' : ''}<code>{'{' + v + '}'}</code></span>)}
               </p>
               <div className="flex flex-wrap gap-2">
@@ -499,7 +532,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
       </Collapsible>
 
       {notice && (
-        <div className="rounded-md bg-warn-bg px-3 py-2 text-[12.5px] text-warn [&_code]:font-mono [&_code]:text-xs">
+        <div className="rounded-md bg-warn-bg px-3 py-2 text-[0.7812rem] text-warn [&_code]:font-mono [&_code]:text-xs">
           {notice.body}
           {notice.buttons.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -513,7 +546,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
         {turns.map((t, i) => t.kind === 'q' ? (
           <div key={i} className="max-h-40 max-w-[85%] self-end overflow-auto rounded-xl rounded-br-sm bg-primary/15 px-3 py-2 whitespace-pre-wrap">
             {t.text}
-            {t.withData && data && <div className="mt-1 text-[11px] text-muted-foreground">+ данные: {num(data.count)} задач</div>}
+            {t.withData && data && <div className="mt-1 text-[0.6875rem] text-muted-foreground">+ данные: {num(data.count)} задач</div>}
           </div>
         ) : (
           <div key={i} className="rounded-lg border px-3 py-2">
@@ -522,7 +555,7 @@ export function AiPanel({ request, shown }: AiPanelProps) {
               : t.state !== 'stopped' && <span className="text-muted-foreground italic">Модель думает…</span>}
             {t.state === 'stopped' && <p className="text-muted-foreground italic">Остановлено.</p>}
             {t.state === 'done' && (
-              <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <div className="mt-1.5 flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
                 <span className="flex-1">{t.meta}</span>
                 <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={async () => { if (await copyText(t.text)) setCopied(i); }}>
                   <CopyIcon /> {copied === i ? 'Скопировано' : 'Копировать ответ'}
@@ -533,7 +566,8 @@ export function AiPanel({ request, shown }: AiPanelProps) {
         ))}
       </div>
 
-      <div className="flex items-end gap-2">
+      {/* Пока открыты настройки, строки отправки нет — им достаётся всё место; закрыли — вернулась */}
+      <div className={cn('flex items-end gap-2', settingsOpen && 'hidden')}>
         <Textarea ref={inputRef} rows={5} spellCheck={false} className="max-h-[min(40vh,8.5rem)] min-h-16 flex-1 resize-none"
           placeholder={locked ? PH_NEXT : PH_FIRST} value={input} disabled={busy}
           onChange={(e) => { setInput(e.target.value); if (!messages.current.length) setInputEdited(true); }}

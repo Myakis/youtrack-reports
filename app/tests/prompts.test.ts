@@ -89,3 +89,11 @@ describe('готовые цели', async () => {
     expect(isGoal('something')).toBe(false);
   });
 });
+
+describe('цели руководителя', async () => {
+  const { LEAD_GOALS, GOAL_GROUPS } = await import('../src/core/prompts');
+  it('в режиме руководителя — повышение и 1:1, остальные группы общие', () => {
+    expect(LEAD_GOALS).toEqual(['promo', 'oneOnOne']);
+    expect(GOAL_GROUPS.filter((g) => !g.lead).flatMap((g) => g.goals.map((x) => x.v))).not.toContain('promo');
+  });
+});

@@ -27,7 +27,7 @@ const versionPlugin = {
 const ctx = await context({
   entryPoints: { app: 'src/app/main.tsx' },
   outdir: out, bundle: true, format: 'iife', target: ['chrome116', 'firefox115'], charset: 'utf8',
-  jsx: 'automatic', sourcemap: true, plugins: [versionPlugin],
+  jsx: 'automatic', sourcemap: true, plugins: [versionPlugin], loader: { '.md': 'text' },
   define: { 'process.env.NODE_ENV': '"development"' }, logLevel: 'info',
 });
 await ctx.watch();

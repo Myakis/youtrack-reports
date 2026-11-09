@@ -70,7 +70,7 @@ for (const [name, manifest] of Object.entries(targets)) {
   await build({
     entryPoints: { background: 'src/background.ts', app: 'src/app/main.tsx' },
     outdir: out, bundle: true, format: 'iife', target: ['firefox115', 'chrome116'], charset: 'utf8',
-    jsx: 'automatic', minify: true, legalComments: 'none',
+    jsx: 'automatic', minify: true, legalComments: 'none', loader: { '.md': 'text' },
     define: { __VERSION__: JSON.stringify(version), 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning',
   });
   const p = join(out, 'app.js');

@@ -21,6 +21,8 @@ export interface Form {
   withSwimlanes: boolean;
   /** Ещё затраченное время по учёту времени. */
   withTime: boolean;
+  /** Ещё путь по статусам (история поля «Состояние»). */
+  withFlow: boolean;
   wide: boolean;
 }
 
@@ -28,7 +30,7 @@ export function defaultForm(): Form {
   const r = presetRange('month');
   return {
     mode: 'assignee', assignee: '', states: 'Готово', project: '', board: '', sprint: '', types: '', tags: '',
-    preset: 'month', from: r.from, to: r.to, dateField: 'resolved', withBoards: true, withSwimlanes: false, withTime: true, wide: false,
+    preset: 'month', from: r.from, to: r.to, dateField: 'resolved', withBoards: true, withSwimlanes: false, withTime: true, withFlow: false, wide: false,
   };
 }
 
@@ -39,6 +41,7 @@ export function restoreForm(saved: any): Form {
   f.withBoards = saved?.withBoards !== false;
   f.withSwimlanes = !!f.withSwimlanes;
   f.withTime = saved?.withTime !== false;
+  f.withFlow = !!f.withFlow;
   f.wide = !!f.wide;
   if (f.preset !== 'custom') Object.assign(f, presetRange((f.preset || 'month') as Preset));
   return f;
@@ -60,8 +63,11 @@ export function queryOptions(f: Form, users: User[], assigneeAttr: string): Quer
 }
 
 /** В режиме «участник» в запросе — только фильтр задач: условие на сотрудника YouTrack Reports проверяет сам. */
+/** «Участник» — только когда сотрудник выбран; без сотрудника ищутся задачи всех. */
+export const isParticipant = (f: Form) => f.mode === 'participant' && !!f.assignee.trim();
+
 export const formQuery = (f: Form, users: User[], attr: string) =>
-  (f.mode === 'participant' ? baseQuery(queryOptions(f, users, attr)) : buildQuery(queryOptions(f, users, attr)));
+  (isParticipant(f) ? baseQuery(queryOptions(f, users, attr)) : buildQuery(queryOptions(f, users, attr)));
 
 export const boardOf = (f: Form, boards: Board[]) => findBoard(boards, f.board);
 

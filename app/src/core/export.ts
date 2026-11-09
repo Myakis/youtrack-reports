@@ -3,6 +3,7 @@ import { fmtDate, type Issue } from './youtrack';
 import { rolesLabel } from './participation';
 import { computeStats, statsLines, type Stats } from './stats';
 import { fmtMinutes } from './time';
+import { flowStats, flowText, fmtDuration, stateDurations } from './flow';
 
 export interface ExportMeta {
   assignee: string;     // «Иван Петров (ivan.petrov)»
@@ -45,7 +46,15 @@ export function toMarkdown(issues: Issue[], meta: ExportMeta, o: ExportOptions =
   if (meta.period) out.push(`- Период: ${meta.period}`);
   out.push(`- Запрос YouTrack: \`${meta.query}\``);
   out.push(`- Выгружено: ${fmtDate(meta.generated)}`, '');
-  if (issues.length) out.push('## Сводка', '', ...statsLines(computeStats(issues), meta.compare).map((l) => '- ' + l), '');
+  if (issues.length) {
+    const lines = statsLines(computeStats(issues), meta.compare);
+    const fs = flowStats(issues);
+    if (fs?.states.length) {
+      lines.push(`В статусах (медиана): ${fs.states.map((x) => `${x.state} — ${fmtDuration(x.median)}`).join(', ')}`);
+      if (fs.withReturns) lines.push(`Задач с возвратами назад по статусам: ${fs.withReturns} из ${fs.total}`);
+    }
+    out.push('## Сводка', '', ...lines.map((l) => '- ' + l), '');
+  }
 
   for (const i of issues) {
     out.push(`## ${i.key} — ${i.summary}`, '');
@@ -61,6 +70,7 @@ export function toMarkdown(issues: Issue[], meta: ExportMeta, o: ExportOptions =
     line('Создана', fmtDate(i.created));
     line('Решена', fmtDate(i.resolved));
     if (i.spent) line('Списано времени', fmtMinutes(i.spent));
+    if (i.flow?.steps.length) line('Путь по статусам', flowText(i.flow, !!i.resolved) + (i.flow.returns ? `; возвратов: ${i.flow.returns}` : ''));
     if (o.fields !== false) {
       for (const [k, v] of Object.entries(i.fields)) if (v && !SKIP_FIELDS.has(k.toLowerCase())) line(k, v);
     }
@@ -88,6 +98,11 @@ export function toJSON(issues: Issue[], meta: ExportMeta, o: ExportOptions = {})
     boards: i.boards,
     ...(i.swimlanes.length ? { swimlanes: i.swimlanes } : {}),
     ...(i.spent != null ? { spentMinutes: i.spent } : {}),
+    ...(i.flow ? {
+      statusPath: i.flow.steps.map((s) => ({ state: s.state, from: new Date(s.from).toISOString(), to: s.to ? new Date(s.to).toISOString() : null })),
+      statusDays: Object.fromEntries([...stateDurations(i.flow, !!i.resolved)].map(([k, ms]) => [k, Math.round(ms / 864e5 * 10) / 10])),
+      statusReturns: i.flow.returns,
+    } : {}),
     tags: i.tags,
     state: i.state,
     assignee: i.assignee,
@@ -115,12 +130,15 @@ export function toCSV(issues: Issue[], o: ExportOptions = {}): string {
   const withRoles = issues.some((i) => i.roles.length);
   const withLanes = issues.some((i) => i.swimlanes.length);
   const withTime = issues.some((i) => i.spent != null);
+  const withFlow = issues.some((i) => i.flow);
+  if (withFlow) head.splice(head.indexOf('Ссылка'), 0, 'Путь по статусам');
   if (withTime) head.splice(head.indexOf('Ссылка'), 0, 'Время, ч');
   if (withLanes) head.splice(4, 0, 'Свимлейн');
   if (withRoles) head.splice(2, 0, 'Участие');
   const rows = [head];
   for (const i of issues) {
     const r = [i.key, i.summary, i.project, i.boards.join('; '), i.tags.join(', '), i.state, i.assignee, fmtDate(i.created), fmtDate(i.resolved), i.url];
+    if (withFlow) r.splice(r.length - 1, 0, i.flow ? flowText(i.flow, !!i.resolved) : '');
     if (withTime) r.splice(r.length - 1, 0, i.spent != null ? (Math.round(i.spent / 6) / 10).toLocaleString('ru') : '');
     if (withLanes) r.splice(4, 0, i.swimlanes.join('; '));
     if (withRoles) r.splice(2, 0, rolesLabel(i.roles));

@@ -1,16 +1,18 @@
 // Карточка фильтров: сотрудник, статус, проект, доска и спринт, тип, тег, период; команда и запрос YouTrack.
 import { useState } from 'react';
-import { ChevronRightIcon, RotateCcwIcon, SearchIcon, StarIcon, XIcon } from 'lucide-react';
+import { BookmarkIcon, BookmarkPlusIcon, ChevronRightIcon, RotateCcwIcon, SearchIcon, StarIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { hasSprints, type Board, type Project, type User } from '../../core/youtrack';
-import type { Form } from '../lib/form';
+import { isParticipant, type Form } from '../lib/form';
+import type { SavedSearch } from '../lib/saved';
 import { MultiPicker, SinglePicker, SuggestInput } from './pickers';
 import { PeriodPicker } from './PeriodPicker';
 
@@ -20,7 +22,7 @@ const W = 'h-8 w-full';
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn('flex min-w-0 flex-col gap-1', className)}>
-      <span className="text-[11px] tracking-wide text-muted-foreground uppercase">{label}</span>
+      <span className="text-[0.6875rem] tracking-wide text-muted-foreground uppercase">{label}</span>
       {children}
     </div>
   );
@@ -36,6 +38,8 @@ export interface FiltersProps {
   states: string[];
   tags: string[];
   tagsLoaded: boolean;
+  /** Типы задач выбранного проекта (доски) или всего YouTrack; note — откуда список. */
+  types: { list: string[]; loading: boolean; note: string };
   team: string[];
   login: string;
   userName: (login: string) => string;
@@ -49,6 +53,42 @@ export interface FiltersProps {
   onQueryReset: () => void;
   searching: boolean;
   onSearch: () => void;
+  saved: SavedSearch[];
+  /** Какой сохранённый поиск запускали последним — его чип подсвечен. */
+  activeSaved: string;
+  suggestName: () => string;
+  onSaveSearch: (name: string) => void;
+  onRunSaved: (s: SavedSearch) => void;
+  onRemoveSaved: (id: string) => void;
+}
+
+/** «Сохранить поиск»: имя (предложенное по фильтрам) и кнопка; то же имя — заменить. */
+function SaveSearch({ saved, suggest, onSave }: { saved: SavedSearch[]; suggest: () => string; onSave: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const exists = saved.some((s) => s.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const save = () => { if (!name.trim()) return; onSave(name.trim()); setOpen(false); };
+  return (
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) setName(suggest()); }}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-muted-foreground" title="Сохранить текущие фильтры (и запрос, если правили вручную) под именем">
+          <BookmarkPlusIcon className="size-3.5" /> Сохранить поиск
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="flex w-80 flex-col gap-2 p-3">
+        <Label htmlFor="saved-name" className="text-xs">Название поиска</Label>
+        <Input id="saved-name" className="h-8" autoFocus value={name} onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+        <p className="text-[0.6875rem] text-muted-foreground">
+          Период вроде «Этот месяц» при запуске считается на сегодня.{exists && ' Поиск с таким именем заменится.'}
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" className="h-7" onClick={() => setOpen(false)}>Отмена</Button>
+          <Button size="sm" className="h-7" disabled={!name.trim()} onClick={save}>{exists ? 'Заменить' : 'Сохранить'}</Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export function Filters(p: FiltersProps) {
@@ -62,28 +102,39 @@ export function Filters(p: FiltersProps) {
     <section className="flex flex-col gap-2.5 rounded-lg border bg-card px-3 py-2.5">
       {/* Сетка с равными колонками: при переносе поля встают ровными рядами */}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] items-end gap-x-2.5 gap-y-2">
-        <Field label="Роль">
-          <Select value={f.mode} onValueChange={(v) => update({ mode: v as Form['mode'] })}>
-            <SelectTrigger size="sm" className={W} title={'Исполнитель — задачи, где он исполнитель сейчас.\nУчастник — ещё и задачи, где он был исполнителем раньше, менял задачу (например, перевёл в тестирование) или комментировал.'}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="assignee">исполнитель</SelectItem>
-              <SelectItem value="participant">участник</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
         <Field label="Сотрудник" className="col-span-2">
           <div className="flex gap-1.5">
-            <SuggestInput className="flex-1" value={f.assignee} onChange={(v) => update({ assignee: v })} onEnter={p.onSearch}
-              placeholder={p.usersFailed ? 'Логин (список пользователей недоступен)' : 'Имя или логин'}
-              items={p.users.map((u) => ({ value: u.login, label: u.name, hint: u.login + (u.email ? ' · ' + u.email : '') }))}
-              emptyText="Нет такого сотрудника" />
-            <Button variant="outline" size="icon" className="size-8" title="Добавить в команду / убрать" onClick={p.onStar}>
+            <div className="relative min-w-0 flex-1">
+              <SuggestInput className="w-full" value={f.assignee} onChange={(v) => update({ assignee: v })} onEnter={p.onSearch}
+                placeholder={p.usersFailed ? 'Все сотрудники — или логин' : 'Все сотрудники — или имя, логин'}
+                items={p.users.map((u) => ({ value: u.login, label: u.name, hint: u.login + (u.email ? ' · ' + u.email : '') }))}
+                emptyText="Нет такого сотрудника" />
+              {f.assignee && (
+                <button type="button" className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  title="Все сотрудники" aria-label="Все сотрудники" onClick={() => update({ assignee: '' })}>
+                  <XIcon className="size-3.5" />
+                </button>
+              )}
+            </div>
+            <Button variant="outline" size="icon" className="size-8" title="Добавить в команду / убрать" disabled={!f.assignee.trim()} onClick={p.onStar}>
               <StarIcon className={cn(starred && 'fill-amber-400 text-amber-400')} />
             </Button>
           </div>
         </Field>
+        {/* Роль — только для одного сотрудника: у «всех» её нет */}
+        {f.assignee.trim() && (
+          <Field label="Роль">
+            <Select value={f.mode} onValueChange={(v) => update({ mode: v as Form['mode'] })}>
+              <SelectTrigger size="sm" className={W} title={'Исполнитель — задачи, где он исполнитель сейчас.\nУчастник — ещё и задачи, где он был исполнителем раньше, менял задачу (например, перевёл в тестирование) или комментировал.'}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="assignee">исполнитель</SelectItem>
+                <SelectItem value="participant">участник</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
         <Field label="Статус">
           <MultiPicker className={W} any="Любой статус" title="Статус"
             values={f.states.split(',').map((s) => s.trim()).filter(Boolean)}
@@ -109,8 +160,11 @@ export function Filters(p: FiltersProps) {
           </Field>
         )}
         <Field label="Тип">
-          <Input className={W} placeholder="Любой" title="Можно несколько через запятую: Frontend, Mobile" autoComplete="off" spellCheck={false}
-            value={f.types} onChange={(e) => update({ types: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') p.onSearch(); }} />
+          <MultiPicker className={W} any="Любой тип" title="Тип задачи"
+            values={f.types.split(',').map((s) => s.trim()).filter(Boolean)}
+            onChange={(v) => update({ types: [...new Set(v)].join(', ') })} items={p.types.list}
+            find="Найти или добавить тип…" empty="Нет такого типа" loading={p.types.loading ? 'Типы загружаются…' : 'Типов не нашлось — введите вручную'}
+            heading={p.types.note} />
         </Field>
         <Field label="Тег">
           <SuggestInput className={W} multi value={f.tags} onChange={(v) => update({ tags: v })} onEnter={p.onSearch}
@@ -131,7 +185,7 @@ export function Filters(p: FiltersProps) {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Ещё" className={f.mode === 'participant' ? 'col-span-3' : 'col-span-2'}>
+        <Field label="Ещё" className={isParticipant(f) ? 'col-span-4' : 'col-span-3'}>
           <div className="flex h-8 items-center gap-4">
             <Label className="gap-2 font-normal" title="Определить доски и спринты задач — дольше, зато в выгрузке будет доска">
               <Checkbox checked={f.withBoards} onCheckedChange={(v) => update({ withBoards: !!v })} /> Доски
@@ -142,7 +196,10 @@ export function Filters(p: FiltersProps) {
             <Label className="gap-2 font-normal" title="Затраченное время по учёту времени: сколько списал сотрудник (без сотрудника — все) за всю жизнь задачи">
               <Checkbox checked={f.withTime} onCheckedChange={(v) => update({ withTime: !!v })} /> Время
             </Label>
-            {f.mode === 'participant' && (
+            <Label className="gap-2 font-normal" title="Путь по статусам: сколько задача пробыла в работе, на ревью, в тестировании и возвращалась ли назад — по истории статуса">
+              <Checkbox checked={f.withFlow} onCheckedChange={(v) => update({ withFlow: !!v })} /> Статусы
+            </Label>
+            {isParticipant(f) && (
               <Label className="gap-2 font-normal whitespace-nowrap" title="Кроме «исполнитель / был исполнителем» — ещё задачи, где сотрудник менял поля (например, статус) или комментировал">
                 <Checkbox checked={f.wide} onCheckedChange={(v) => update({ wide: !!v })} /> + менял / комментировал
               </Label>
@@ -166,6 +223,21 @@ export function Filters(p: FiltersProps) {
           </span>
         ))}
         {!p.team.length && <span className="text-xs text-muted-foreground">отметьте ☆ у исполнителя, чтобы он появился здесь</span>}
+      </div>
+
+      <div className="-mt-1 flex min-h-6 flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-muted-foreground">Поиски:</span>
+        {p.saved.map((s) => (
+          <span key={s.id} className={cn('inline-flex max-w-72 items-center rounded-full border bg-muted pl-2 text-xs', s.id === p.activeSaved && 'border-primary bg-selected')}>
+            <button className="flex min-w-0 items-center gap-1 py-0.5" title={`Запустить: ${s.name}${s.query ? `\nЗапрос: ${s.query}` : ''}`} onClick={() => p.onRunSaved(s)} disabled={p.searching}>
+              <BookmarkIcon className="size-3 shrink-0 text-muted-foreground" /><span className="truncate">{s.name}</span>
+            </button>
+            <button className="ml-0.5 rounded-full p-1 text-muted-foreground hover:text-destructive" title="Удалить сохранённый поиск" onClick={() => p.onRemoveSaved(s.id)}>
+              <XIcon className="size-3" />
+            </button>
+          </span>
+        ))}
+        <SaveSearch saved={p.saved} suggest={p.suggestName} onSave={p.onSaveSearch} />
       </div>
 
       <Collapsible open={qOpen} onOpenChange={setQOpen}>

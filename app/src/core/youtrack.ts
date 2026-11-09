@@ -1,5 +1,6 @@
 // Запросы к REST API YouTrack. Сам fetch подставляется снаружи: из расширения (сессия или токен) или тестовые данные.
 import { uniqSorted } from './suggest';
+import type { Flow } from './flow';
 
 export interface RawResponse {
   status: number;
@@ -68,11 +69,11 @@ export async function listUsers(f: Fetcher): Promise<User[]> {
   return out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 }
 
-export interface Project { key: string; name: string }
+export interface Project { key: string; name: string; id?: string }
 
 export async function listProjects(f: Fetcher): Promise<Project[]> {
-  const ps: any[] = await getJson(f, '/api/admin/projects?' + qs({ fields: 'shortName,name,archived', $top: 1000 }));
-  return ps.filter((p) => !p.archived).map((p) => ({ key: p.shortName, name: p.name })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  const ps: any[] = await getJson(f, '/api/admin/projects?' + qs({ fields: 'id,shortName,name,archived', $top: 1000 }));
+  return ps.filter((p) => !p.archived).map((p) => ({ key: p.shortName, name: p.name, id: p.id })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 }
 
 /** Теги, видимые текущему пользователю (общие и свои), без повторов, по алфавиту. */
@@ -195,6 +196,46 @@ export async function withoutPeriod(f: Fetcher, parts: QueryPart[]): Promise<{ f
 }
 
 /** Значения поля статуса, которые встречаются у задач (проекта): подсказка, как статус называется на самом деле. */
+const TYPE_NAMES = ['type', 'тип'];
+
+/**
+ * Типы задач проектов: значения поля «Тип» из настроек проекта (полный список, без архивных);
+ * если настройки не прочитать — типы последних 300 задач этих проектов (без проектов — всего YouTrack), по частоте.
+ * from — откуда список: 'project' — из настроек, 'issues' — по задачам.
+ */
+export async function knownTypes(f: Fetcher, projects: Project[]): Promise<{ types: string[]; from: 'project' | 'issues' }> {
+  const out = new Set<string>();
+  let ok = projects.length > 0;
+  for (const p of projects) {
+    if (!p.id) { ok = false; break; }
+    try {
+      const cfs: any[] = await getJson(f, `/api/admin/projects/${encodeURIComponent(p.id)}/customFields?` + qs({
+        fields: 'field(name),bundle(values(name,archived))', $top: 200,
+      }));
+      const cf = cfs.find((c) => TYPE_NAMES.includes(String(c?.field?.name || '').trim().toLowerCase()));
+      const vals = (cf?.bundle?.values || []).filter((v: any) => v?.name && !v.archived).map((v: any) => v.name as string);
+      if (!vals.length) { ok = false; break; }
+      vals.forEach((v: string) => out.add(v));
+    } catch (e) {
+      if ((e as YtError).kind === 'network') throw e;
+      ok = false;
+      break;
+    }
+  }
+  if (ok) return { types: [...out], from: 'project' };
+  const query = projects.length ? `project: ${projects.map((p) => br(p.key)).join(', ')}` : '';
+  const list: any[] = await getJson(f, '/api/issues?' + qs({ query, fields: 'customFields(name,value(name))', $top: 300 }));
+  const seen = new Map<string, number>();
+  for (const i of list) {
+    for (const cf of i.customFields || []) {
+      if (!TYPE_NAMES.includes(String(cf.name).trim().toLowerCase())) continue;
+      const v = cf.value?.name;
+      if (v) seen.set(v, (seen.get(v) || 0) + 1);
+    }
+  }
+  return { types: [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([v]) => v), from: 'issues' };
+}
+
 export async function knownStates(f: Fetcher, project?: string): Promise<string[]> {
   const query = project?.trim() ? `project: ${br(project)}` : '';
   const list: any[] = await getJson(f, '/api/issues?' + qs({ query, fields: 'customFields(name,$type,value(name))', $top: 300 }));
@@ -225,6 +266,8 @@ export interface Issue {
   swimlanes: string[];    // свимлейн на доске: «Algeria (PRJ-5270)» или значение поля; на нескольких досках — «Доска / …»
   parents: string[];      // ключи родительских задач («подзадача для»)
   spent: number | null;   // минуты по записям учёта времени (сотрудника или всех); null — не загружали
+  stateField: string;     // как называется поле статуса у задачи («Состояние», «State»…)
+  flow: Flow | null;      // путь по статусам; null — не загружали
   state: string;
   assignee: string;
   reporter: string;
@@ -247,7 +290,7 @@ export const ISSUE_FIELDS = [
   'links(direction,linkType(name,sourceToTarget,targetToSource),issues(idReadable))',
 ].join(',');
 
-const STATE_NAMES = ['state', 'состояние', 'статус', 'status'];
+export const STATE_NAMES = ['state', 'состояние', 'статус', 'status'];
 export const ASSIGNEE_NAMES = ['assignee', 'исполнитель'];
 
 /** Связь «подзадача для»: у дочерней задачи связь типа Subtask входящая. */
@@ -276,12 +319,12 @@ export function fmtDate(ms: number | null | undefined, time = true): string {
 
 export function normalizeIssue(raw: any, base: string): Issue {
   const fields: Record<string, string> = {};
-  let state = '', assignee = '';
+  let state = '', assignee = '', stateField = '';
   for (const cf of raw.customFields || []) {
     const val = fieldValue(cf.$type || '', cf.value);
     fields[cf.name] = val;
     const n = String(cf.name).toLowerCase();
-    if (!state && (STATE_NAMES.includes(n) || cf.$type === 'StateIssueCustomField')) state = val;
+    if (!state && (STATE_NAMES.includes(n) || cf.$type === 'StateIssueCustomField')) { state = val; stateField = cf.name; }
     if (!assignee && ASSIGNEE_NAMES.includes(n)) assignee = val;
   }
   const links: Link[] = [];
@@ -305,6 +348,8 @@ export function normalizeIssue(raw: any, base: string): Issue {
     swimlanes: [],
     parents,
     spent: null,
+    stateField,
+    flow: null,
     state,
     assignee,
     reporter: raw.reporter?.fullName || raw.reporter?.login || '',

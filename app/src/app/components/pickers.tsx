@@ -81,7 +81,7 @@ export function SinglePicker({ value, onChange, items, any, find, empty, title, 
   );
 }
 
-// ---------- Несколько (статусы) ----------
+// ---------- Несколько (статусы, типы) ----------
 export interface MultiPickerProps {
   values: string[];
   onChange: (values: string[]) => void;
@@ -89,9 +89,15 @@ export interface MultiPickerProps {
   any: string;
   title: string;
   className?: string;
+  /** Тексты: поле поиска, «не найдено», «ещё загружается», подпись над списком. */
+  find?: string;
+  empty?: string;
+  loading?: string;
+  heading?: string;
 }
 
-export function MultiPicker({ values, onChange, items, any, title, className }: MultiPickerProps) {
+export function MultiPicker({ values, onChange, items, any, title, className, find = 'Найти или добавить статус…', empty = 'Нет такого статуса',
+  loading = 'Статусы ещё загружаются — введите вручную', heading }: MultiPickerProps) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   // Выбранные, которых нет среди известных (введённые вручную), — тоже в списке
@@ -109,10 +115,10 @@ export function MultiPicker({ values, onChange, items, any, title, className }: 
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start">
         <Command shouldFilter={false}>
-          <CommandInput placeholder="Найти или добавить статус…" value={q} onValueChange={setQ} />
+          <CommandInput placeholder={find} value={q} onValueChange={setQ} />
           <CommandList>
-            <CommandEmpty>{items.length ? 'Нет такого статуса' : 'Статусы ещё загружаются — введите вручную'}</CommandEmpty>
-            <CommandGroup>
+            <CommandEmpty>{items.length ? empty : loading}</CommandEmpty>
+            <CommandGroup heading={heading}>
               {shown.map((s) => (
                 <CommandItem key={s} value={'s:' + s} onSelect={() => toggle(s)} className="gap-2">
                   <span className={cn('flex size-4 items-center justify-center rounded-[4px] border border-input', values.includes(s) && 'border-primary bg-primary text-primary-foreground')}>

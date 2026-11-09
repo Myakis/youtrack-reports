@@ -8,7 +8,9 @@ const users = [
   { login: 'm.popov', fullName: 'Максим Попов' },
   { login: 'old.user', fullName: 'Уволенный Сотрудник', banned: true },
 ];
-const projects = [{ shortName: 'CD', name: 'CashDash' }, { shortName: 'MOB', name: 'Мобильное приложение' }];
+const projects = [{ id: '0-1', shortName: 'CD', name: 'CashDash' }, { id: '0-2', shortName: 'MOB', name: 'Мобильное приложение' }];
+/** Значения поля «Тип» в настройках проектов. */
+const projectTypes: Record<string, string[]> = { '0-1': ['Задача', 'Ошибка', 'Эпик', 'Frontend', 'Backend'], '0-2': ['Задача', 'Ошибка', 'Mobile', 'Дизайн'] };
 
 const day = 86400000;
 const now = Date.now();
@@ -60,10 +62,31 @@ const agiles = [
 const sprintIssues: Record<string, string[]> = { '2-1': ['CD-101', 'CD-102', 'CD-104', 'CD-106', 'CD-107'], '2-2': ['MOB-103'], '2-3': ['MOB-105', 'CD-101'] };
 
 // История: CD-104 сначала делала Анна, потом передала Дмитрию; MOB-105 Анна перевела в тестирование
+/**
+ * Смены статуса по пути [статус, доля времени]: от создания до решения (у нерешённой — до обновления).
+ * by — кто переводил (по умолчанию m.popov, чтобы не менять участие a.ivanova).
+ */
+function statePath(key: string, path: [string, number][], by: Record<number, string> = {}) {
+  const i = issues.find((x) => x.idReadable === key)!;
+  const end = i.resolved ?? i.updated;
+  const total = path.slice(0, -1).reduce((a, [, w]) => a + w, 0);
+  let t = i.created;
+  return path.slice(0, -1).map(([from, w], k) => {
+    t += (end - i.created) * w / total;
+    return { author: { login: by[k] || 'm.popov' }, target: { idReadable: key }, timestamp: Math.round(t), field: { name: 'Состояние' }, added: [{ name: path[k + 1][0] }], removed: [{ name: from }] };
+  });
+}
+
 const activities = [
-  { author: { login: 'a.ivanova' }, target: { idReadable: 'CD-104' }, field: { name: 'Исполнитель' }, added: [{ login: 'd.smirnov' }], removed: [{ login: 'a.ivanova' }] },
-  { author: { login: 'a.ivanova' }, target: { idReadable: 'MOB-105' }, field: { name: 'Состояние' }, added: [{ name: 'Тестирование' }], removed: [{ name: 'В работе' }] },
-  { author: { login: 'm.popov' }, target: { idReadable: 'CD-106' }, field: { name: 'Приоритет' }, added: [{ name: 'Высокий' }], removed: [] },
+  { author: { login: 'a.ivanova' }, target: { idReadable: 'CD-104' }, timestamp: now - 20 * day, field: { name: 'Исполнитель' }, added: [{ login: 'd.smirnov' }], removed: [{ login: 'a.ivanova' }] },
+  { author: { login: 'm.popov' }, target: { idReadable: 'CD-106' }, timestamp: now - 30 * day, field: { name: 'Приоритет' }, added: [{ name: 'Высокий' }], removed: [] },
+  // CD-101 возвращали из ревью в работу; MOB-105 Анна перевела в тестирование
+  ...statePath('CD-101', [['Новая', 1], ['В работе', 4], ['Ревью', 1], ['В работе', 2], ['Ревью', 2], ['Готово', 0]]),
+  ...statePath('CD-102', [['Новая', 2], ['В работе', 3], ['Ревью', 1], ['Готово', 0]]),
+  ...statePath('MOB-103', [['Новая', 1], ['В работе', 6], ['Ревью', 2], ['Тестирование', 3], ['Готово', 0]]),
+  ...statePath('CD-104', [['Новая', 1], ['В работе', 2], ['Готово', 0]]),
+  ...statePath('MOB-105', [['Новая', 1], ['В работе', 3], ['Тестирование', 2], ['Ревью', 0]], { 1: 'a.ivanova' }),
+  ...statePath('CD-106', [['Новая', 3], ['В работе', 2], ['Готово к тестированию', 0]]),
 ];
 
 // Учёт времени (минуты)
@@ -93,6 +116,12 @@ export const mockFetch: Fetcher = async (path) => {
   if (p === '/api/users/me') return ok(users[0]);
   if (p === '/api/users') return ok(users.slice(skip, skip + top));
   if (p === '/api/admin/projects') return ok(projects);
+  const pcf = /^\/api\/admin\/projects\/([^/]+)\/customFields$/.exec(p);
+  if (pcf) {
+    const vals = projectTypes[decodeURIComponent(pcf[1])];
+    if (!vals) return { status: 404, type: 'basic', text: '{"error":"not found"}' };
+    return ok([{ field: { name: 'Тип' }, bundle: { values: [...vals.map((name) => ({ name, archived: false })), { name: 'Старый тип', archived: true }] } }]);
+  }
   if (p === '/api/tags') {
     const all = ['экспорт', 'Q4', 'баг', 'UI', 'производительность', 'доки', 'CashDash', 'CashDash Mobile', 'Рефакторинг'].map((name) => ({ name }));
     return ok(all.slice(skip, skip + top));

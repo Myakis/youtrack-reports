@@ -20,6 +20,8 @@ export interface Stats {
   byType: [string, number][];
   byProject: [string, number][];
   byPriority: [string, number][];
+  /** Задачи по исполнителям — для отчёта по всем сотрудникам. */
+  byAssignee: [string, number][];
 }
 
 /** Сколько раз встречается каждое значение — по убыванию; пустое — «без значения». */
@@ -48,6 +50,7 @@ export function computeStats(issues: Issue[]): Stats {
     byType: counts(issues.map((i) => fieldOf(i, TYPE_NAMES))),
     byProject: counts(issues.map((i) => i.project)),
     byPriority: counts(issues.map((i) => fieldOf(i, PRIORITY_NAMES))),
+    byAssignee: counts(issues.map((i) => i.assignee)),
   };
 }
 
@@ -97,11 +100,70 @@ export function statsLines(s: Stats, prev?: { stats: Stats; label: string; perio
   if (s.spent != null) out.push(`Затраченное время: ${fmtHours(s.spent)}${prev?.stats.spent != null ? vs(s.spent, prev.stats.spent, fmtHours) : ''}`);
   if (s.leadDays != null) out.push(`От создания до решения (медиана): ${fmtDays(s.leadDays)} дн.`);
   if (s.byType.length) out.push(`По типам: ${top(s.byType)}`);
+  if (s.byAssignee.length > 1) out.push(`По исполнителям: ${top(s.byAssignee)}`);
   if (s.byProject.length > 1) out.push(`По проектам: ${top(s.byProject)}`);
   if (s.byPriority.length) out.push(`По приоритетам: ${top(s.byPriority)}`);
-  if (prev) out.push(`Прошлый период (${prev.period}): задач ${prev.stats.count}${prev.stats.spent != null ? `, время ${fmtHours(prev.stats.spent)}` : ''}`);
+  if (prev) out.push(`Сравнение с ${prev.label} (${prev.period}): задач ${prev.stats.count}${prev.stats.spent != null ? `, время ${fmtHours(prev.stats.spent)}` : ''}`);
   return out;
 }
 
 /** Минуты → «12,5 ч» (для сводки удобнее часы с дробью). */
 export const fmtHours = (m: number) => `${(Math.round(m / 6) / 10).toLocaleString('ru')} ч`;
+
+// ---------- Данные для графиков ----------
+
+export interface Bucket { label: string; title: string; count: number; minutes: number }
+
+const dayStart = (ms: number) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+const ddmm = (d: Date) => `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+const MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+/**
+ * Решённые задачи по неделям (с понедельника) в границах периода; если недель больше 26 — по месяцам.
+ * Без периода — от первой до последней даты решения. Пустые недели тоже есть — иначе провалы не видны.
+ */
+export function resolvedBuckets(issues: Issue[], from = '', to = ''): { by: 'week' | 'month'; buckets: Bucket[] } | null {
+  const done = issues.filter((i) => i.resolved);
+  if (!done.length) return null;
+  const times = done.map((i) => i.resolved!);
+  const start = from ? parse(from) : dayStart(Math.min(...times));
+  const end = to ? parse(to) : dayStart(Math.max(...times));
+  if (end < start) return null;
+  const monday = new Date(start); monday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const weeks = Math.floor((end.getTime() - monday.getTime()) / (7 * 86400000)) + 1;
+  const by = weeks > 26 ? 'month' : 'week';
+  const buckets: (Bucket & { a: number; b: number })[] = [];
+  if (by === 'week') {
+    for (let k = 0; k < weeks; k++) {
+      const a = new Date(monday); a.setDate(monday.getDate() + 7 * k);
+      const b = new Date(a); b.setDate(a.getDate() + 7);
+      const last = new Date(b); last.setDate(b.getDate() - 1);
+      buckets.push({ label: ddmm(a), title: `${ddmm(a)}–${ddmm(last)}`, count: 0, minutes: 0, a: a.getTime(), b: b.getTime() });
+    }
+  } else {
+    for (let d = new Date(start.getFullYear(), start.getMonth(), 1); d <= end; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+      const b = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      const label = `${MONTHS[d.getMonth()]}${d.getMonth() === 0 || !buckets.length ? ' ' + String(d.getFullYear()).slice(2) : ''}`;
+      buckets.push({ label, title: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`, count: 0, minutes: 0, a: d.getTime(), b: b.getTime() });
+    }
+  }
+  for (const i of done) {
+    const x = buckets.find((k) => i.resolved! >= k.a && i.resolved! < k.b);
+    if (x) { x.count++; x.minutes += i.spent || 0; }
+  }
+  return { by, buckets: buckets.map(({ a: _a, b: _b, ...rest }) => rest) };
+}
+
+/** Время по проектам (минуты), по убыванию; задачи без времени не учитываются. */
+export function minutesByProject(issues: Issue[]): [string, number][] {
+  const m = new Map<string, number>();
+  for (const i of issues) if (i.spent) m.set(i.project || 'без проекта', (m.get(i.project || 'без проекта') || 0) + i.spent);
+  return [...m].sort((a, b) => b[1] - a[1]);
+}
+
+/** Время по исполнителям (минуты), по убыванию; задачи без времени не учитываются. */
+export function minutesByAssignee(issues: Issue[]): [string, number][] {
+  const m = new Map<string, number>();
+  for (const i of issues) if (i.spent) m.set(i.assignee || 'без исполнителя', (m.get(i.assignee || 'без исполнителя') || 0) + i.spent);
+  return [...m].sort((a, b) => b[1] - a[1]);
+}
