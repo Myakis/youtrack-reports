@@ -1,10 +1,12 @@
 # Релиз: проверка, сборка и GitHub Release с пакетами для Chrome и Firefox.
-# Запуск — тегом vX.Y.Z (git tag v0.6.5 && git push origin v0.6.5) или кнопкой «Run workflow» во вкладке Actions:
-# тогда версия берётся из app/package.json, а тег создаётся сам. Описание релиза — раздел этой версии из CHANGELOG.md.
+# Обычный путь: поднять версию в app/package.json, описать её в CHANGELOG.md («## X.Y.Z — дата») и запушить в main —
+# релиза этой версии ещё нет, значит он соберётся сам, тег vX.Y.Z создастся. Пуш без новой версии ничего не выпускает.
+# Ещё можно тегом vX.Y.Z или кнопкой «Run workflow» во вкладке Actions. Описание релиза — раздел версии из CHANGELOG.md.
 name: Release
 
 on:
   push:
+    branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
 
@@ -33,29 +35,51 @@ jobs:
 
       - name: Версия
         id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
           TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Пуш в main: выпускаем, только если этой версии ещё нет
+          if [ "$GITHUB_REF_TYPE" = "branch" ]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+              echo "Версия $VERSION уже выпущена — релиз не нужен."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_NAME" != "$TAG" ]; then
             echo "::error::Тег $GITHUB_REF_NAME не совпадает с версией в package.json ($TAG)"
             exit 1
+          fi
+          # Тег запушили, а релиз уже собран пушем в main — второй не нужен
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Релиз $TAG уже есть."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
             echo "::error::Релиз $TAG уже есть — поднимите версию в package.json и добавьте раздел в CHANGELOG.md"
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Описание релиза из CHANGELOG.md
+        if: steps.v.outputs.skip != 'true'
         run: node scripts/release-notes.mjs "${{ steps.v.outputs.version }}" > notes.md
 
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - if: steps.v.outputs.skip != 'true'
+        run: npm ci
+      - if: steps.v.outputs.skip != 'true'
+        run: npm run typecheck
+      - if: steps.v.outputs.skip != 'true'
+        run: npm test
+      - if: steps.v.outputs.skip != 'true'
+        run: npm run build
 
       - name: GitHub Release
+        if: steps.v.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.v.outputs.version }}
